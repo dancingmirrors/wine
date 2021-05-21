@@ -5545,7 +5545,7 @@ static void test_GetPointerInfo( BOOL mouse_in_pointer_enabled )
     pointer_down_seq[0].message.lparam = MAKELONG(pt.x, pt.y);
     pointer_down_seq[1].message.lparam = MAKELONG(pt.x - 100, pt.y - 100);
 
-    if (mouse_in_pointer_enabled) todo_wine ok_seq( pointer_down_seq );
+    if (mouse_in_pointer_enabled) ok_seq( pointer_down_seq );
     else ok_seq( button_down_seq );
 
     mouse_event( MOUSEEVENTF_LEFTUP, 0, 0, 0, 0 );
@@ -5557,7 +5557,7 @@ static void test_GetPointerInfo( BOOL mouse_in_pointer_enabled )
     pointer_up_seq[0].message.lparam = MAKELONG(pt.x, pt.y);
     pointer_up_seq[1].message.lparam = MAKELONG(pt.x - 100, pt.y - 100);
 
-    if (mouse_in_pointer_enabled) todo_wine ok_seq( pointer_up_seq );
+    if (mouse_in_pointer_enabled) ok_seq( pointer_up_seq );
     else ok_seq( button_up_seq );
 
     mouse_event( MOUSEEVENTF_MOVE, 20, 20, 0, 0 );
@@ -5569,7 +5569,7 @@ static void test_GetPointerInfo( BOOL mouse_in_pointer_enabled )
     pointer_move_seq[0].message.lparam = MAKELONG(pt.x, pt.y);
     pointer_move_seq[1].message.lparam = MAKELONG(pt.x - 100, pt.y - 100);
 
-    if (mouse_in_pointer_enabled) todo_wine ok_seq( pointer_move_seq );
+    if (mouse_in_pointer_enabled) ok_seq( pointer_move_seq );
     else ok_seq( mouse_move_seq );
 
     p_accept_message = NULL;
@@ -5674,23 +5674,18 @@ static void test_EnableMouseInPointer( const char *arg )
     winetest_push_context( "enable %lu", enable );
 
     ret = pEnableMouseInPointer( enable );
-    todo_wine
     ok( ret, "EnableMouseInPointer failed, error %lu\n", GetLastError() );
 
     SetLastError( 0xdeadbeef );
     ret = pEnableMouseInPointer( !enable );
     ok( !ret, "EnableMouseInPointer succeeded\n" );
-    todo_wine
     ok( GetLastError() == ERROR_ACCESS_DENIED, "got error %lu\n", GetLastError() );
     ret = pIsMouseInPointerEnabled();
-    todo_wine_if(enable)
     ok( ret == enable, "IsMouseInPointerEnabled returned %u, error %lu\n", ret, GetLastError() );
 
     ret = pEnableMouseInPointer( enable );
-    todo_wine
     ok( ret, "EnableMouseInPointer failed, error %lu\n", GetLastError() );
     ret = pIsMouseInPointerEnabled();
-    todo_wine_if(enable)
     ok( ret == enable, "IsMouseInPointerEnabled returned %u, error %lu\n", ret, GetLastError() );
 
     test_GetPointerInfo( enable );
