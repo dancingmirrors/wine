@@ -12,9 +12,14 @@
 #ifdef HAVE_VA_VA_DRM_H
 #include <fcntl.h>
 #include <pthread.h>
+#include <stdint.h>
 #include <unistd.h>
 #include <va/va.h>
 #include <va/va_drm.h>
+#if defined(__x86_64__) || defined(__i386__)
+#include <cpuid.h>
+#include <immintrin.h>
+#endif
 #endif
 
 #include "ntstatus.h"
@@ -56,11 +61,105 @@ static VADisplay va_display;
 static int va_fd = -1;
 static unsigned int va_refcount;
 static pthread_mutex_t va_mutex = PTHREAD_MUTEX_INITIALIZER;
+static BOOL allow_derive = TRUE;
+static BOOL have_sse41;
+
+#if defined(__x86_64__) || defined(__i386__)
+__attribute__((target("sse4.1")))
+static void copy_plane_nt(unsigned char *dst, unsigned int dst_pitch, const unsigned char *src,
+                          unsigned int src_pitch, unsigned int width, unsigned int height) {
+    unsigned int row;
+
+    for (row = 0; row < height; ++row) {
+        const unsigned char *s = src + (size_t)row * src_pitch;
+        unsigned char *d = dst + (size_t)row * dst_pitch;
+        size_t left = width;
+        size_t head;
+
+        /* MOVNTDQA requires a 16-byte aligned source. */
+        head = (-(uintptr_t)s) & 15;
+        if (head > left) {
+            head = left;
+        }
+        if (head) {
+            memcpy(d, s, head);
+            s += head;
+            d += head;
+            left -= head;
+        }
+
+        while (left >= 64) {
+            __m128i a = _mm_stream_load_si128((__m128i *)(void *)s);
+            __m128i b = _mm_stream_load_si128((__m128i *)(void *)(s + 16));
+            __m128i c = _mm_stream_load_si128((__m128i *)(void *)(s + 32));
+            __m128i e = _mm_stream_load_si128((__m128i *)(void *)(s + 48));
+
+            _mm_storeu_si128((__m128i *)(void *)d, a);
+            _mm_storeu_si128((__m128i *)(void *)(d + 16), b);
+            _mm_storeu_si128((__m128i *)(void *)(d + 32), c);
+            _mm_storeu_si128((__m128i *)(void *)(d + 48), e);
+            s += 64;
+            d += 64;
+            left -= 64;
+        }
+        while (left >= 16) {
+            _mm_storeu_si128((__m128i *)(void *)d, _mm_stream_load_si128((__m128i *)(void *)s));
+            s += 16;
+            d += 16;
+            left -= 16;
+        }
+        if (left) {
+            memcpy(d, s, left);
+        }
+    }
+
+    _mm_mfence();
+}
+#endif
+
+static void copy_plane(unsigned char *dst, unsigned int dst_pitch, const unsigned char *src,
+                       unsigned int src_pitch, unsigned int width, unsigned int height) {
+    unsigned int row;
+
+#if defined(__x86_64__) || defined(__i386__)
+    if (have_sse41) {
+        copy_plane_nt(dst, dst_pitch, src, src_pitch, width, height);
+        return;
+    }
+#endif
+
+    for (row = 0; row < height; ++row) {
+        memcpy(dst + (size_t)row * dst_pitch, src + (size_t)row * src_pitch, width);
+    }
+}
+
+static void init_copy_features(void) {
+#if defined(__x86_64__) || defined(__i386__)
+    unsigned int eax, ebx, ecx, edx;
+
+    if (__get_cpuid(1, &eax, &ebx, &ecx, &edx)) {
+        have_sse41 = !!(ecx & bit_SSE4_1);
+    }
+#endif
+    TRACE("Using %s frame readback.\n", have_sse41 ? "streaming-load" : "plain");
+}
 
 static BOOL ensure_display(void) {
     static const char *const nodes[] = {"/dev/dri/renderD128", "/dev/dri/renderD129"};
+    static BOOL features_done;
     unsigned int i;
     int major, minor;
+
+    if (!features_done) {
+        const char *env = getenv("WINE_DXVA2_NO_DERIVE");
+
+        features_done = TRUE;
+        init_copy_features();
+        if (env && *env != '0') {
+            allow_derive = FALSE;
+            TRACE("vaDeriveImage() disabled by WINE_DXVA2_NO_DERIVE.\n");
+        }
+    }
 
     if (va_display) {
         return TRUE;
@@ -78,7 +177,10 @@ static BOOL ensure_display(void) {
             continue;
         }
         if (vaInitialize(display, &major, &minor) == VA_STATUS_SUCCESS) {
-            TRACE("Opened VA-API %d.%d on %s.\n", major, minor, nodes[i]);
+            const char *vendor = vaQueryVendorString(display);
+
+            TRACE("Opened VA-API %d.%d on %s (%s).\n", major, minor, nodes[i],
+                  vendor ? vendor : "unknown driver");
             va_display = display;
             va_fd = fd;
             return TRUE;
@@ -476,15 +578,14 @@ fail:
 static NTSTATUS va_decode_h264(void *args) {
     struct decode_h264_params *params = args;
     struct va_decoder *dec = (struct va_decoder *)(UINT_PTR)params->decoder;
-    VABufferID pic_buf = VA_INVALID_ID, iq_buf = VA_INVALID_ID;
-    VABufferID *slice_bufs = NULL, *data_bufs = NULL;
     VAPictureParameterBufferH264 pic_param;
     VASliceParameterBufferH264 *slice_params;
-    VAIQMatrixBufferH264 iq_matrix;
     NTSTATUS ret = STATUS_UNSUCCESSFUL;
+    VAIQMatrixBufferH264 iq_matrix;
+    unsigned int i, buf_count = 0;
+    VABufferID *bufs = NULL;
     VASurfaceID target;
     VAStatus status;
-    unsigned int i;
 
     if (!dec || params->pic_params->CurrPic.Index7Bits >= dec->surface_count) {
         return STATUS_INVALID_PARAMETER;
@@ -501,14 +602,9 @@ static NTSTATUS va_decode_h264(void *args) {
     if (!params->slice_count || !(slice_params = calloc(params->slice_count, sizeof(*slice_params)))) {
         return STATUS_INVALID_PARAMETER;
     }
-    if (!(slice_bufs = calloc(params->slice_count, sizeof(*slice_bufs)))
-        || !(data_bufs = calloc(params->slice_count, sizeof(*data_bufs)))) {
-        free(slice_bufs);
+    if (!(bufs = calloc(2 + 2 * (size_t)params->slice_count, sizeof(*bufs)))) {
         free(slice_params);
         return STATUS_NO_MEMORY;
-    }
-    for (i = 0; i < params->slice_count; ++i) {
-        slice_bufs[i] = data_bufs[i] = VA_INVALID_ID;
     }
 
     target = dec->surfaces[params->pic_params->CurrPic.Index7Bits];
@@ -525,16 +621,18 @@ static NTSTATUS va_decode_h264(void *args) {
         goto done;
     }
 
-    vaCreateBuffer(va_display, dec->context, VAPictureParameterBufferType,
-                   sizeof(pic_param), 1, &pic_param, &pic_buf);
-    vaRenderPicture(va_display, dec->context, &pic_buf, 1);
+    if (vaCreateBuffer(va_display, dec->context, VAPictureParameterBufferType,
+                       sizeof(pic_param), 1, &pic_param, &bufs[buf_count]) == VA_STATUS_SUCCESS) {
+        ++buf_count;
+    }
 
     if (params->qmatrix) {
         memcpy(iq_matrix.ScalingList4x4, params->qmatrix->bScalingLists4x4, sizeof(iq_matrix.ScalingList4x4));
         memcpy(iq_matrix.ScalingList8x8, params->qmatrix->bScalingLists8x8, sizeof(iq_matrix.ScalingList8x8));
-        vaCreateBuffer(va_display, dec->context, VAIQMatrixBufferType,
-                       sizeof(iq_matrix), 1, &iq_matrix, &iq_buf);
-        vaRenderPicture(va_display, dec->context, &iq_buf, 1);
+        if (vaCreateBuffer(va_display, dec->context, VAIQMatrixBufferType,
+                           sizeof(iq_matrix), 1, &iq_matrix, &bufs[buf_count]) == VA_STATUS_SUCCESS) {
+            ++buf_count;
+        }
     }
 
     for (i = 0; i < params->slice_count; ++i) {
@@ -554,13 +652,27 @@ static NTSTATUS va_decode_h264(void *args) {
             continue;
         }
 
-        vaCreateBuffer(va_display, dec->context, VASliceParameterBufferType,
-                       sizeof(*slice_params), 1, &slice_params[i], &slice_bufs[i]);
-        vaRenderPicture(va_display, dec->context, &slice_bufs[i], 1);
+        if (vaCreateBuffer(va_display, dec->context, VASliceParameterBufferType,
+                           sizeof(*slice_params), 1, &slice_params[i],
+                           &bufs[buf_count]) != VA_STATUS_SUCCESS) {
+            continue;
+        }
+        ++buf_count;
 
-        vaCreateBuffer(va_display, dec->context, VASliceDataBufferType,
-                       size, 1, (void *)((const char *)params->bitstream + offset), &data_bufs[i]);
-        vaRenderPicture(va_display, dec->context, &data_bufs[i], 1);
+        if (vaCreateBuffer(va_display, dec->context, VASliceDataBufferType, size, 1,
+                           (void *)((const char *)params->bitstream + offset),
+                           &bufs[buf_count]) != VA_STATUS_SUCCESS) {
+            vaDestroyBuffer(va_display, bufs[--buf_count]);
+            continue;
+        }
+        ++buf_count;
+    }
+
+    if (buf_count
+        && (status = vaRenderPicture(va_display, dec->context, bufs, buf_count)) != VA_STATUS_SUCCESS) {
+        ERR("vaRenderPicture failed: %s\n", vaErrorStr(status));
+        vaEndPicture(va_display, dec->context);
+        goto done;
     }
 
     if ((status = vaEndPicture(va_display, dec->context)) != VA_STATUS_SUCCESS) {
@@ -571,23 +683,11 @@ static NTSTATUS va_decode_h264(void *args) {
     ret = STATUS_SUCCESS;
 
 done:
-    if (pic_buf != VA_INVALID_ID) {
-        vaDestroyBuffer(va_display, pic_buf);
-    }
-    if (iq_buf != VA_INVALID_ID) {
-        vaDestroyBuffer(va_display, iq_buf);
-    }
-    for (i = 0; i < params->slice_count; ++i) {
-        if (slice_bufs[i] != VA_INVALID_ID) {
-            vaDestroyBuffer(va_display, slice_bufs[i]);
-        }
-        if (data_bufs[i] != VA_INVALID_ID) {
-            vaDestroyBuffer(va_display, data_bufs[i]);
-        }
+    for (i = 0; i < buf_count; ++i) {
+        vaDestroyBuffer(va_display, bufs[i]);
     }
     pthread_mutex_unlock(&va_mutex);
-    free(data_bufs);
-    free(slice_bufs);
+    free(bufs);
     free(slice_params);
     return ret;
 }
@@ -595,7 +695,7 @@ done:
 static NTSTATUS va_copy_surface(void *args) {
     struct copy_surface_params *params = args;
     struct va_decoder *dec = (struct va_decoder *)(UINT_PTR)params->decoder;
-    unsigned int row, w = params->width, h = params->height;
+    unsigned int w = params->width, h = params->height;
     unsigned char *src, *dst = params->dst;
     NTSTATUS ret = STATUS_UNSUCCESSFUL;
     VASurfaceID surface;
@@ -613,7 +713,7 @@ static NTSTATUS va_copy_surface(void *args) {
     vaSyncSurface(va_display, surface);
 
     derived = FALSE;
-    if (vaDeriveImage(va_display, surface, &image) == VA_STATUS_SUCCESS) {
+    if (allow_derive && vaDeriveImage(va_display, surface, &image) == VA_STATUS_SUCCESS) {
         if (image.format.fourcc == VA_FOURCC_NV12 && image.num_planes >= 2
             && image.width >= w && image.height >= h) {
             derived = TRUE;
@@ -644,12 +744,9 @@ static NTSTATUS va_copy_surface(void *args) {
         goto unlock;
     }
 
-    for (row = 0; row < h; ++row) {
-        memcpy(dst + row * params->dst_pitch, src + image.offsets[0] + row * image.pitches[0], w);
-    }
-    for (row = 0; row < h / 2; ++row) {
-        memcpy(dst + (h + row) * params->dst_pitch, src + image.offsets[1] + row * image.pitches[1], w);
-    }
+    copy_plane(dst, params->dst_pitch, src + image.offsets[0], image.pitches[0], w, h);
+    copy_plane(dst + (size_t)h * params->dst_pitch, params->dst_pitch,
+               src + image.offsets[1], image.pitches[1], w, h / 2);
 
     vaUnmapBuffer(va_display, image.buf);
     vaDestroyImage(va_display, image.image_id);

@@ -785,9 +785,16 @@ static gboolean sink_query_cb(GstPad *pad, GstObject *parent, GstQuery *query)
             }
 
             gst_query_parse_accept_caps(query, &caps);
-            wg_format_from_caps(&format, caps);
-            wg_format_from_caps(&current_format, stream->desired_caps);
-            ret = wg_format_compare(&format, &current_format);
+            if (gst_caps_is_fixed(caps) && gst_caps_is_fixed(stream->desired_caps))
+            {
+                wg_format_from_caps(&format, caps);
+                wg_format_from_caps(&current_format, stream->desired_caps);
+                ret = wg_format_compare(&format, &current_format);
+            }
+            else
+            {
+                ret = gst_caps_can_intersect(caps, stream->desired_caps);
+            }
 
             pthread_mutex_unlock(&parser->mutex);
 

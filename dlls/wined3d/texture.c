@@ -3702,6 +3702,12 @@ static HRESULT wined3d_texture_init(struct wined3d_texture *texture, const struc
         TRACE("Creating an oversized (%ux%u) surface.\n", desc->width, desc->height);
     }
 
+    if ((format->attrs & WINED3D_FORMAT_ATTR_PLANAR) && ((desc->width & 1) || (desc->height & 1)))
+    {
+        WARN("Attempt to create a planar texture with unaligned size %ux%u.\n", desc->width, desc->height);
+        return WINED3DERR_INVALIDCALL;
+    }
+
     for (i = 0; i < layer_count; ++i)
     {
         for (j = 0; j < level_count; ++j)
@@ -4671,6 +4677,55 @@ const VkDescriptorImageInfo *wined3d_texture_vk_get_default_image_info(struct wi
     return &texture_vk->default_image_info;
 }
 
+static void wined3d_format_copy_planar_data(const struct wined3d_adapter *adapter,
+        const struct wined3d_format *format, const uint8_t *src, unsigned int src_row_pitch,
+        uint8_t *dst, unsigned int dst_row_pitch, unsigned int width, unsigned int height)
+{
+    unsigned int i;
+
+    for (i = 0; i < 2; ++i)
+    {
+        const struct wined3d_format *plane_format = wined3d_get_format(adapter, format->plane_formats[i], 0);
+        unsigned int plane_width = i ? width / format->uv_width : width;
+        unsigned int plane_height = i ? height / format->uv_height : height;
+        unsigned int plane_src_pitch = i ? src_row_pitch * 2 / format->uv_width : src_row_pitch;
+        unsigned int plane_dst_pitch = i ? dst_row_pitch * 2 / format->uv_width : dst_row_pitch;
+
+        wined3d_format_copy_data(plane_format, src, plane_src_pitch, plane_src_pitch * plane_height,
+                dst, plane_dst_pitch, plane_dst_pitch * plane_height, plane_width, plane_height, 1);
+
+        src += src_row_pitch * height;
+        dst += dst_row_pitch * height;
+    }
+}
+
+static void wined3d_format_get_plane_copy_regions(const struct wined3d_adapter *adapter,
+        const struct wined3d_format *format, VkBufferImageCopy regions[2], VkDeviceSize buffer_offset,
+        unsigned int row_pitch, const VkImageSubresourceLayers *subresource,
+        unsigned int width, unsigned int height)
+{
+    unsigned int i;
+
+    memset(regions, 0, 2 * sizeof(*regions));
+
+    for (i = 0; i < 2; ++i)
+    {
+        const struct wined3d_format *plane_format = wined3d_get_format(adapter, format->plane_formats[i], 0);
+        unsigned int plane_width = i ? width / format->uv_width : width;
+        unsigned int plane_height = i ? height / format->uv_height : height;
+        unsigned int plane_pitch = i ? row_pitch * 2 / format->uv_width : row_pitch;
+
+        regions[i].bufferOffset = buffer_offset + (i ? (VkDeviceSize)row_pitch * height : 0);
+        regions[i].bufferRowLength = plane_pitch / plane_format->byte_count;
+        regions[i].bufferImageHeight = plane_height;
+        regions[i].imageSubresource = *subresource;
+        regions[i].imageSubresource.aspectMask = i ? VK_IMAGE_ASPECT_PLANE_1_BIT : VK_IMAGE_ASPECT_PLANE_0_BIT;
+        regions[i].imageExtent.width = plane_width;
+        regions[i].imageExtent.height = plane_height;
+        regions[i].imageExtent.depth = 1;
+    }
+}
+
 static void wined3d_texture_vk_upload_data(struct wined3d_context *context,
         const struct wined3d_const_bo_address *src_bo_addr, const struct wined3d_format *src_format,
         const struct wined3d_box *src_box, unsigned int src_row_pitch, unsigned int src_slice_pitch,
@@ -4761,7 +4816,11 @@ static void wined3d_texture_vk_upload_data(struct wined3d_context *context,
 
         wined3d_format_calculate_pitch(src_format, context->device->surface_alignment, src_width, src_height,
                 &staging_row_pitch, &staging_slice_pitch);
-        staging_size = staging_slice_pitch * src_depth;
+        if (src_format->attrs & WINED3D_FORMAT_ATTR_PLANAR)
+            staging_size = wined3d_format_calculate_size(src_format,
+                    context->device->surface_alignment, src_width, src_height, src_depth);
+        else
+            staging_size = staging_slice_pitch * src_depth;
 
         if (!wined3d_context_vk_create_bo(context_vk, staging_size,
                 VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, &staging_bo))
@@ -4780,8 +4839,13 @@ static void wined3d_texture_vk_upload_data(struct wined3d_context *context,
             return;
         }
 
-        wined3d_format_copy_data(src_format, src_bo_addr->addr + src_offset, src_row_pitch, src_slice_pitch,
-                map_ptr, staging_row_pitch, staging_slice_pitch, src_width, src_height, src_depth);
+        if (src_format->attrs & WINED3D_FORMAT_ATTR_PLANAR)
+            wined3d_format_copy_planar_data(context->device->adapter, src_format,
+                    src_bo_addr->addr + src_offset, src_row_pitch,
+                    map_ptr, staging_row_pitch, src_width, src_height);
+        else
+            wined3d_format_copy_data(src_format, src_bo_addr->addr + src_offset, src_row_pitch, src_slice_pitch,
+                    map_ptr, staging_row_pitch, staging_slice_pitch, src_width, src_height, src_depth);
 
         range.offset = 0;
         range.size = staging_size;
@@ -4828,25 +4892,53 @@ static void wined3d_texture_vk_upload_data(struct wined3d_context *context,
             dst_texture_vk->layout, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
             dst_texture_vk->image.vk_image, &vk_range);
 
-    region.bufferOffset = src_bo->b.buffer_offset + src_offset;
-    region.bufferRowLength = (src_row_pitch / src_format->block_byte_count) * src_format->block_width;
-    if (src_row_pitch)
-        region.bufferImageHeight = (src_slice_pitch / src_row_pitch) * src_format->block_height;
-    else
-        region.bufferImageHeight = 1;
-    region.imageSubresource.aspectMask = vk_range.aspectMask;
-    region.imageSubresource.mipLevel = vk_range.baseMipLevel;
-    region.imageSubresource.baseArrayLayer = vk_range.baseArrayLayer;
-    region.imageSubresource.layerCount = vk_range.layerCount;
-    region.imageOffset.x = dst_x;
-    region.imageOffset.y = dst_y;
-    region.imageOffset.z = dst_z;
-    region.imageExtent.width = src_width;
-    region.imageExtent.height = src_height;
-    region.imageExtent.depth = src_depth;
+    if (dst_texture->resource.format->attrs & WINED3D_FORMAT_ATTR_PLANAR)
+    {
+        const struct wined3d_format *format = dst_texture->resource.format;
+        VkImageSubresourceLayers subresource;
+        VkBufferImageCopy regions[2];
+        unsigned int i;
 
-    VK_CALL(vkCmdCopyBufferToImage(vk_command_buffer, src_bo->vk_buffer,
-            dst_texture_vk->image.vk_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region));
+        subresource.aspectMask = vk_range.aspectMask;
+        subresource.mipLevel = vk_range.baseMipLevel;
+        subresource.baseArrayLayer = vk_range.baseArrayLayer;
+        subresource.layerCount = vk_range.layerCount;
+
+        wined3d_format_get_plane_copy_regions(context->device->adapter, format, regions,
+                src_bo->b.buffer_offset + src_offset, src_row_pitch, &subresource, src_width, src_height);
+
+        for (i = 0; i < 2; ++i)
+        {
+            regions[i].imageOffset.x = i ? dst_x / format->uv_width : dst_x;
+            regions[i].imageOffset.y = i ? dst_y / format->uv_height : dst_y;
+            regions[i].imageOffset.z = dst_z;
+        }
+
+        VK_CALL(vkCmdCopyBufferToImage(vk_command_buffer, src_bo->vk_buffer,
+                dst_texture_vk->image.vk_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 2, regions));
+    }
+    else
+    {
+        region.bufferOffset = src_bo->b.buffer_offset + src_offset;
+        region.bufferRowLength = (src_row_pitch / src_format->block_byte_count) * src_format->block_width;
+        if (src_row_pitch)
+            region.bufferImageHeight = (src_slice_pitch / src_row_pitch) * src_format->block_height;
+        else
+            region.bufferImageHeight = 1;
+        region.imageSubresource.aspectMask = vk_range.aspectMask;
+        region.imageSubresource.mipLevel = vk_range.baseMipLevel;
+        region.imageSubresource.baseArrayLayer = vk_range.baseArrayLayer;
+        region.imageSubresource.layerCount = vk_range.layerCount;
+        region.imageOffset.x = dst_x;
+        region.imageOffset.y = dst_y;
+        region.imageOffset.z = dst_z;
+        region.imageExtent.width = src_width;
+        region.imageExtent.height = src_height;
+        region.imageExtent.depth = src_depth;
+
+        VK_CALL(vkCmdCopyBufferToImage(vk_command_buffer, src_bo->vk_buffer,
+                dst_texture_vk->image.vk_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region));
+    }
 
     wined3d_context_vk_image_barrier(context_vk, vk_command_buffer,
             VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
@@ -5007,32 +5099,16 @@ static void wined3d_texture_vk_download_data(struct wined3d_context *context,
     if (src_texture->resource.format->attrs & WINED3D_FORMAT_ATTR_PLANAR)
     {
         const struct wined3d_format *format = src_texture->resource.format;
-        const struct wined3d_adapter *adapter = src_texture->resource.device->adapter;
-        VkBufferImageCopy regions[2] = {0};
-        size_t plane_offset = 0;
-        unsigned int i;
+        VkImageSubresourceLayers subresource;
+        VkBufferImageCopy regions[2];
 
-        FIXME("download planar: img %ux%u, src_pitch %u dst_pitch %u dst_slice %u, uv %u/%u.\n",
-              src_width, src_height, src_row_pitch, dst_row_pitch, dst_slice_pitch,
-              format->uv_width, format->uv_height);
+        subresource.aspectMask = vk_range.aspectMask;
+        subresource.mipLevel = vk_range.baseMipLevel;
+        subresource.baseArrayLayer = vk_range.baseArrayLayer;
+        subresource.layerCount = vk_range.layerCount;
 
-        for (i = 0; i < 2; ++i)
-        {
-            const struct wined3d_format *plane_format = wined3d_get_format(adapter, format->plane_formats[i], 0);
-            unsigned int plane_width = i ? src_width / format->uv_width : src_width;
-            unsigned int plane_height = i ? src_height / format->uv_height : src_height;
-
-            regions[i].bufferOffset = dst_bo->b.buffer_offset + dst_offset + plane_offset;
-            regions[i].imageSubresource.aspectMask = i ? VK_IMAGE_ASPECT_PLANE_1_BIT : VK_IMAGE_ASPECT_PLANE_0_BIT;
-            regions[i].imageSubresource.mipLevel = vk_range.baseMipLevel;
-            regions[i].imageSubresource.baseArrayLayer = vk_range.baseArrayLayer;
-            regions[i].imageSubresource.layerCount = vk_range.layerCount;
-            regions[i].imageExtent.width = plane_width;
-            regions[i].imageExtent.height = plane_height;
-            regions[i].imageExtent.depth = 1;
-
-            plane_offset += plane_width * plane_height * plane_format->byte_count;
-        }
+        wined3d_format_get_plane_copy_regions(src_texture->resource.device->adapter, format, regions,
+                dst_bo->b.buffer_offset + dst_offset, src_row_pitch, &subresource, src_width, src_height);
 
         VK_CALL(vkCmdCopyImageToBuffer(vk_command_buffer, src_texture_vk->image.vk_image,
                 VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dst_bo->vk_buffer, 2, regions));
@@ -5084,24 +5160,9 @@ static void wined3d_texture_vk_download_data(struct wined3d_context *context,
 
         if (dst_format->attrs & WINED3D_FORMAT_ATTR_PLANAR)
         {
-            const struct wined3d_adapter *adapter = src_texture->resource.device->adapter;
-            unsigned int box_w = src_box->right - src_box->left;
-            unsigned int box_h = src_box->bottom - src_box->top;
-            unsigned int box_d = src_box->back - src_box->front;
-            unsigned int uv_width = dst_format->uv_width;
-            unsigned int uv_height = dst_format->uv_height;
-            const struct wined3d_format *plane_format;
-
-            plane_format = wined3d_get_format(adapter, dst_format->plane_formats[0], 0);
-            wined3d_format_copy_data(plane_format, map_ptr, src_row_pitch, src_slice_pitch,
-                    dst_bo_addr->addr, dst_row_pitch, dst_slice_pitch, box_w, box_h, box_d);
-            plane_format = wined3d_get_format(adapter, dst_format->plane_formats[1], 0);
-            /* Derive the offset from the row pitch and height. */
-            wined3d_format_copy_data(plane_format, (const uint8_t *)map_ptr + src_row_pitch * box_h,
-                    src_row_pitch * 2 / uv_width, src_row_pitch * box_h,
-                    (uint8_t *)dst_bo_addr->addr + dst_row_pitch * box_h,
-                    dst_row_pitch * 2 / uv_width, dst_row_pitch * box_h,
-                    box_w / uv_width, box_h / uv_height, box_d);
+            wined3d_format_copy_planar_data(src_texture->resource.device->adapter, dst_format,
+                    map_ptr, src_row_pitch, dst_bo_addr->addr, dst_row_pitch,
+                    src_box->right - src_box->left, src_box->bottom - src_box->top);
         }
         else
         {
@@ -5147,9 +5208,22 @@ static bool wined3d_texture_vk_clear(struct wined3d_texture_vk *texture_vk,
 
     if (texture_vk->t.resource.format_attrs & WINED3D_FORMAT_ATTR_PLANAR)
     {
-        /* XXX */
-        FIXME("Not clearing planar texture %p.\n", &texture_vk->t);
-        wined3d_texture_validate_location(&texture_vk->t, sub_resource_idx, WINED3D_LOCATION_TEXTURE_RGB);
+        const struct wined3d_color *c = &sub_resource->clear_value.colour;
+        unsigned int row_pitch, slice_pitch, level;
+        struct wined3d_bo_address addr;
+
+        if (c->r || c->g || c->b || c->a)
+            FIXME("Planar resource %p is cleared to a non-zero colour.\n", &texture_vk->t);
+
+        if (!wined3d_texture_prepare_location(&texture_vk->t, sub_resource_idx, context, WINED3D_LOCATION_SYSMEM))
+            return false;
+        wined3d_texture_get_bo_address(&texture_vk->t, sub_resource_idx, &addr, WINED3D_LOCATION_SYSMEM);
+        level = sub_resource_idx % texture_vk->t.level_count;
+        wined3d_texture_get_pitch(&texture_vk->t, level, &row_pitch, &slice_pitch);
+        memset(addr.addr, 0, min(slice_pitch, sub_resource->size));
+        if (sub_resource->size > slice_pitch)
+            memset(addr.addr + slice_pitch, 0x80, sub_resource->size - slice_pitch);
+        wined3d_texture_validate_location(&texture_vk->t, sub_resource_idx, WINED3D_LOCATION_SYSMEM);
         return true;
     }
 

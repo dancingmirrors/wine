@@ -1163,6 +1163,27 @@ static uint64_t scale_uint64(uint64_t value, uint32_t numerator, uint32_t denomi
 }
 
 /* Fill and send a single IMediaSample. */
+static void dump_sample_region(const char *name, const BYTE *data, unsigned int size)
+{
+    unsigned int i, step, min = 255, max = 0;
+    UINT64 total = 0;
+
+    if (!size)
+        return;
+
+    step = max(1u, size / 4096);
+    for (i = 0; i < size; i += step)
+    {
+        unsigned int v = data[i];
+        if (v < min) min = v;
+        if (v > max) max = v;
+        total += v;
+    }
+
+    TRACE("    %s: %u bytes, min %u, max %u, mean %u.\n", name, size, min, max,
+            (unsigned int)(total / ((size + step - 1) / step)));
+}
+
 static HRESULT send_sample(struct parser_source *pin, IMediaSample *sample,
         const struct wg_parser_buffer *buffer, uint32_t offset, uint32_t size, DWORD bytes_per_second)
 {
@@ -1183,6 +1204,23 @@ static HRESULT send_sample(struct parser_source *pin, IMediaSample *sample,
     {
         /* The GStreamer pin has been flushed. */
         return S_OK;
+    }
+
+    if (TRACE_ON(quartz) && IsEqualGUID(&pin->pin.pin.mt.formattype, &FORMAT_VideoInfo))
+    {
+        const VIDEOINFOHEADER *format = (const VIDEOINFOHEADER *)pin->pin.pin.mt.pbFormat;
+        unsigned int luma = format->bmiHeader.biWidth * abs(format->bmiHeader.biHeight);
+
+        if (luma && luma < size)
+        {
+            /* Planar YUV: report the two planes separately. */
+            dump_sample_region("plane 0", ptr, luma);
+            dump_sample_region("plane 1", ptr + luma, size - luma);
+        }
+        else
+        {
+            dump_sample_region("frame", ptr, size);
+        }
     }
 
     if (buffer->has_pts || (pin->interpolate_timestamps && pin->prev_end_pts != 0))
@@ -1644,6 +1682,22 @@ static HRESULT decodebin_parser_source_query_accept(struct parser_source *pin, c
     return amt_to_wg_format(mt, &format) ? S_OK : S_FALSE;
 }
 
+static BOOL parser_prefer_rgb(void)
+{
+    static int cached = -1;
+
+    if (cached == -1)
+    {
+        const char *env = getenv("WINE_QUARTZ_PREFER_RGB");
+
+        cached = env && *env != '0';
+        if (cached)
+            FIXME("Offering only RGB video formats because WINE_QUARTZ_PREFER_RGB is set.\n");
+    }
+
+    return cached;
+}
+
 static HRESULT decodebin_parser_source_get_media_type(struct parser_source *pin,
         unsigned int index, AM_MEDIA_TYPE *mt)
 {
@@ -1668,9 +1722,29 @@ static HRESULT decodebin_parser_source_get_media_type(struct parser_source *pin,
         WG_VIDEO_FORMAT_RGB15,
     };
 
+    static const enum wg_video_format rgb_formats[] =
+    {
+        WG_VIDEO_FORMAT_BGRx,
+        WG_VIDEO_FORMAT_BGRA,
+        WG_VIDEO_FORMAT_BGR,
+    };
+
     wg_parser_stream_get_current_format(pin->wg_stream, &format);
 
     memset(mt, 0, sizeof(AM_MEDIA_TYPE));
+
+    if (format.major_type == WG_MAJOR_TYPE_VIDEO && parser_prefer_rgb())
+    {
+        if (index >= ARRAY_SIZE(rgb_formats))
+            return VFW_S_NO_MORE_ITEMS;
+
+        format.u.video.format = rgb_formats[index];
+        if (format.u.video.height > 0)
+            format.u.video.height = -format.u.video.height;
+        if (!amt_from_wg_format(mt, &format, false))
+            return E_OUTOFMEMORY;
+        return S_OK;
+    }
 
     if (amt_from_wg_format(mt, &format, false))
     {
@@ -1682,7 +1756,6 @@ static HRESULT decodebin_parser_source_get_media_type(struct parser_source *pin,
     if (format.major_type == WG_MAJOR_TYPE_VIDEO && index < ARRAY_SIZE(video_formats))
     {
         format.u.video.format = video_formats[index];
-        /* Downstream filters probably expect RGB video to be bottom-up. */
         if (format.u.video.height > 0 && wg_video_format_is_rgb(video_formats[index]))
             format.u.video.height = -format.u.video.height;
         if (!amt_from_wg_format(mt, &format, false))
@@ -2113,11 +2186,14 @@ static HRESULT WINAPI GSTOutPin_DecideBufferSize(struct strmbase_source *iface,
     unsigned int buffer_count = 1;
     unsigned int buffer_size = 16384;
     ALLOCATOR_PROPERTIES ret_props;
+    HRESULT hr;
 
     if (IsEqualGUID(&pin->pin.pin.mt.formattype, &FORMAT_VideoInfo))
     {
         VIDEOINFOHEADER *format = (VIDEOINFOHEADER *)pin->pin.pin.mt.pbFormat;
+
         buffer_size = format->bmiHeader.biSizeImage;
+        buffer_count = 8;
     }
     else if (IsEqualGUID(&pin->pin.pin.mt.formattype, &FORMAT_MPEGVideo))
     {
@@ -2146,7 +2222,15 @@ static HRESULT WINAPI GSTOutPin_DecideBufferSize(struct strmbase_source *iface,
     props->cBuffers = max(props->cBuffers, buffer_count);
     props->cbBuffer = max(props->cbBuffer, buffer_size);
     props->cbAlign = max(props->cbAlign, 1);
-    return IMemAllocator_SetProperties(allocator, props, &ret_props);
+
+    if (FAILED(hr = IMemAllocator_SetProperties(allocator, props, &ret_props)))
+        return hr;
+
+    if (ret_props.cBuffers < props->cBuffers || ret_props.cbBuffer < props->cbBuffer)
+        WARN("Got %ld buffers of %ld bytes, wanted %ld buffers of %ld bytes.\n",
+                ret_props.cBuffers, ret_props.cbBuffer, props->cBuffers, props->cbBuffer);
+
+    return S_OK;
 }
 
 static void free_source_pin(struct parser_source *pin)

@@ -789,6 +789,69 @@ static void STDMETHODCALLTYPE d3d11_device_context_Draw(ID3D11DeviceContext1 *if
     wined3d_device_context_draw(context->wined3d_context, start_vertex_location, vertex_count, 0, 0);
 }
 
+struct wine_map_record
+{
+    ID3D11Resource *resource;
+    const unsigned char *data;
+    unsigned int size;
+    unsigned int row_pitch;
+    DWORD thread_id;
+};
+static struct wine_map_record wine_map_records[16];
+
+static void wine_record_map(ID3D11Resource *resource, const struct wined3d_map_desc *map_desc)
+{
+    unsigned int i;
+
+    if (!map_desc->data || !map_desc->slice_pitch)
+        return;
+
+    for (i = 0; i < ARRAY_SIZE(wine_map_records); ++i)
+    {
+        if (wine_map_records[i].resource && wine_map_records[i].resource != resource)
+            continue;
+        wine_map_records[i].resource = resource;
+        wine_map_records[i].data = map_desc->data;
+        wine_map_records[i].size = map_desc->slice_pitch;
+        wine_map_records[i].row_pitch = map_desc->row_pitch;
+        wine_map_records[i].thread_id = GetCurrentThreadId();
+        return;
+    }
+}
+
+static void wine_report_unmap(ID3D11Resource *resource)
+{
+    unsigned int i, j, step;
+    unsigned int min, max;
+    uint64_t total;
+
+    for (i = 0; i < ARRAY_SIZE(wine_map_records); ++i)
+    {
+        struct wine_map_record *record = &wine_map_records[i];
+
+        if (record->resource != resource || record->thread_id != GetCurrentThreadId())
+            continue;
+
+        min = 255;
+        max = 0;
+        total = 0;
+        step = max(1u, record->size / 4096);
+        for (j = 0; j < record->size; j += step)
+        {
+            unsigned int v = record->data[j];
+            if (v < min) min = v;
+            if (v > max) max = v;
+            total += v;
+        }
+        TRACE("    unmapped resource %p, %u bytes, row_pitch %u: min %u, max %u, mean %u.\n",
+                resource, record->size, record->row_pitch, min, max,
+                (unsigned int)(total / ((record->size + step - 1) / step)));
+
+        record->resource = NULL;
+        return;
+    }
+}
+
 static HRESULT STDMETHODCALLTYPE d3d11_device_context_Map(ID3D11DeviceContext1 *iface, ID3D11Resource *resource,
         UINT subresource_idx, D3D11_MAP map_type, UINT map_flags, D3D11_MAPPED_SUBRESOURCE *mapped_subresource)
 {
@@ -817,6 +880,10 @@ static HRESULT STDMETHODCALLTYPE d3d11_device_context_Map(ID3D11DeviceContext1 *
         mapped_subresource->pData = map_desc.data;
         mapped_subresource->RowPitch = map_desc.row_pitch;
         mapped_subresource->DepthPitch = map_desc.slice_pitch;
+        TRACE("    mapped resource %p at %p, row_pitch %u, slice_pitch %u.\n",
+                resource, map_desc.data, map_desc.row_pitch, map_desc.slice_pitch);
+        if (TRACE_ON(d3d11))
+            wine_record_map(resource, &map_desc);
     }
 
     return hr;
@@ -829,6 +896,9 @@ static void STDMETHODCALLTYPE d3d11_device_context_Unmap(ID3D11DeviceContext1 *i
     struct wined3d_resource *wined3d_resource;
 
     TRACE("iface %p, resource %p, subresource_idx %u.\n", iface, resource, subresource_idx);
+
+    if (TRACE_ON(d3d11))
+        wine_report_unmap(resource);
 
     wined3d_resource = wined3d_resource_from_d3d11_resource(resource);
 
@@ -3934,6 +4004,12 @@ static HRESULT STDMETHODCALLTYPE d3d11_device_CreateTexture2D(ID3D11Device2 *ifa
     HRESULT hr;
 
     TRACE("iface %p, desc %p, data %p, texture %p.\n", iface, desc, data, texture);
+    if (desc)
+        TRACE("    %ux%u, mips %u, array %u, format %s, samples %u/%u, usage %#x, "
+                "bind %#x, cpu_access %#x, misc %#x, initial data %p.\n",
+                desc->Width, desc->Height, desc->MipLevels, desc->ArraySize,
+                debug_dxgi_format(desc->Format), desc->SampleDesc.Count, desc->SampleDesc.Quality,
+                desc->Usage, desc->BindFlags, desc->CPUAccessFlags, desc->MiscFlags, data);
 
     if (FAILED(hr = d3d_texture2d_create(device, desc, NULL, data, &object)))
         return hr;

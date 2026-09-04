@@ -185,6 +185,12 @@ static void create_texture_view(struct wined3d_gl_view *view, GLenum view_target
     view_format_gl = wined3d_format_gl(view_format);
     view->target = view_target;
 
+    if (texture_gl->t.resource.format->attrs & WINED3D_FORMAT_ATTR_PLANAR)
+    {
+        FIXME("Planar views are not implemented for OpenGL.\n");
+        return;
+    }
+
     context = context_acquire(texture_gl->t.resource.device, NULL, 0);
     context_gl = wined3d_context_gl(context);
     gl_info = context_gl->gl_info;
