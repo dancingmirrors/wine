@@ -88,6 +88,7 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(unwind);
 WINE_DECLARE_DEBUG_CHANNEL(seh);
+WINE_DECLARE_DEBUG_CHANNEL(winediag);
 
 #include "dwarf.h"
 
@@ -2166,6 +2167,113 @@ static BOOL handle_syscall_trap( ucontext_t *sigcontext, siginfo_t *siginfo )
 }
 
 
+
+#ifdef __linux__
+
+#ifndef ARCH_SET_CPUID
+#define ARCH_SET_CPUID 0x1012
+#endif
+
+static int cpuid_hide_sha;
+static int cpuid_faulting;
+static int cpuid_masking_ready;
+
+static void enable_cpuid_masking(void)
+{
+    int ret;
+
+    if (cpuid_faulting || !cpuid_masking_ready || !cpuid_hide_sha) return;
+    if ((ret = arch_prctl( ARCH_SET_CPUID, NULL )) < 0)
+    {
+        cpuid_hide_sha = 0;
+        return;
+    }
+    cpuid_faulting = 1;
+}
+
+static void init_cpuid_masking(void)
+{
+    cpuid_masking_ready = 1;
+    enable_cpuid_masking();
+}
+
+#if defined(__has_attribute) && __has_attribute(no_stack_protector)
+__attribute__((no_stack_protector, noinline))
+#elif defined(__GNUC__) && !defined(__clang__)
+__attribute__((optimize("no-stack-protector"), noinline))
+#else
+__attribute__((noinline))
+#endif
+static BOOL handle_cpuid_fault( ucontext_t *sigcontext )
+{
+    const BYTE *code = (const BYTE *)RIP_sig(sigcontext);
+    unsigned int regs[4], leaf, subleaf;
+
+    if (!cpuid_faulting) return FALSE;
+    if (TRAP_sig(sigcontext) != TRAP_x86_PROTFLT || ERROR_sig(sigcontext)) return FALSE;
+    if (code[0] != 0x0f || code[1] != 0xa2) return FALSE;
+
+    leaf = RAX_sig(sigcontext);
+    subleaf = RCX_sig(sigcontext);
+
+    if (arch_prctl( ARCH_SET_CPUID, (void *)1 ) < 0) return FALSE;
+    __asm__ volatile( "cpuid" : "=a" (regs[0]), "=b" (regs[1]), "=c" (regs[2]), "=d" (regs[3])
+                              : "a" (leaf), "c" (subleaf) );
+    arch_prctl( ARCH_SET_CPUID, NULL );
+
+    if (leaf == 7 && subleaf == 0) regs[1] &= ~(1u << 29);
+
+    RAX_sig(sigcontext) = regs[0];
+    RBX_sig(sigcontext) = regs[1];
+    RCX_sig(sigcontext) = regs[2];
+    RDX_sig(sigcontext) = regs[3];
+    RIP_sig(sigcontext) += 2;
+    return TRUE;
+}
+
+void cpuid_check_module( const void *module, SIZE_T size, const WCHAR *filename, USHORT machine )
+{
+    static const BYTE openssl_shaext_loop[] = { 0x48, 0x8d, 0x46, 0x40, 0x66, 0x0f, 0xfe, 0xcc, 0x48, 0x0f, 0x45, 0xf0 };
+    const IMAGE_DOS_HEADER *dos = module;
+    const IMAGE_NT_HEADERS64 *nt;
+    const IMAGE_SECTION_HEADER *sec;
+    unsigned int i;
+
+    if (cpuid_hide_sha) return;
+    if (machine != IMAGE_FILE_MACHINE_AMD64 || !module || size < sizeof(*dos)) return;
+    if (dos->e_magic != IMAGE_DOS_SIGNATURE || dos->e_lfanew <= 0 || (SIZE_T)dos->e_lfanew + sizeof(*nt) > size) return;
+    nt = (const IMAGE_NT_HEADERS64 *)((const char *)module + dos->e_lfanew);
+    if (nt->Signature != IMAGE_NT_SIGNATURE || nt->FileHeader.Machine != IMAGE_FILE_MACHINE_AMD64) return;
+    if (nt->OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR64_MAGIC) return;
+
+    sec = (const IMAGE_SECTION_HEADER *)((const char *)&nt->OptionalHeader + nt->FileHeader.SizeOfOptionalHeader);
+    for (i = 0; i < nt->FileHeader.NumberOfSections; i++, sec++)
+    {
+        const char *start;
+        SIZE_T len;
+
+        if ((const char *)(sec + 1) > (const char *)module + size) break;
+        if (!(sec->Characteristics & IMAGE_SCN_MEM_EXECUTE)) continue;
+        if (sec->VirtualAddress >= size) continue;
+        start = (const char *)module + sec->VirtualAddress;
+        len = sec->Misc.VirtualSize ? sec->Misc.VirtualSize : sec->SizeOfRawData;
+        if (len > size - sec->VirtualAddress) len = size - sec->VirtualAddress;
+        if (!memmem( start, len, openssl_shaext_loop, sizeof(openssl_shaext_loop) )) continue;
+        cpuid_hide_sha = 1;
+        enable_cpuid_masking();
+        return;
+    }
+}
+
+#else
+
+static inline BOOL handle_cpuid_fault( void *sigcontext ) { return FALSE; }
+static inline void init_cpuid_masking(void) { }
+void cpuid_check_module( const void *module, SIZE_T size, const WCHAR *filename, USHORT machine ) { }
+
+#endif
+
+
 /**********************************************************************
  *		segv_handler
  *
@@ -2175,8 +2283,11 @@ static void segv_handler( int signal, siginfo_t *siginfo, void *sigcontext )
 {
     EXCEPTION_RECORD rec = { 0 };
     struct xcontext context;
-    ucontext_t *ucontext = init_handler( sigcontext );
+    ucontext_t *ucontext;
 
+    if (handle_cpuid_fault( sigcontext )) return;
+
+    ucontext = init_handler( sigcontext );
     rec.ExceptionAddress = (void *)RIP_sig(ucontext);
     save_context( &context, ucontext );
 
@@ -2774,6 +2885,7 @@ void signal_init_process(void)
 #endif
 
     install_bpf(&sig_act);
+    init_cpuid_masking();
 
     return;
 

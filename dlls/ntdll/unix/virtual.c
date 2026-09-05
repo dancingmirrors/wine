@@ -3517,6 +3517,9 @@ NTSTATUS virtual_map_module( HANDLE mapping, void **module, SIZE_T *size, SECTIO
         status = virtual_map_image( mapping, module, size, shared_file, limit_low, limit_high, 0,
                                     machine, image_info, filename, FALSE );
         virtual_fill_image_information( image_info, info );
+#ifdef __x86_64__
+        if (NT_SUCCESS( status )) cpuid_check_module( *module, *size, filename, image_info->machine );
+#endif
     }
     if (shared_file) NtClose( shared_file );
     free( image_info );

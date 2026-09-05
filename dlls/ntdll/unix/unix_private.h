@@ -320,6 +320,7 @@ extern void signal_init_threading(void);
 extern NTSTATUS signal_alloc_thread( TEB *teb );
 extern void signal_free_thread( TEB *teb );
 extern void signal_init_process(void);
+extern void cpuid_check_module( const void *module, SIZE_T size, const WCHAR *filename, USHORT machine );
 extern void DECLSPEC_NORETURN signal_start_thread( PRTL_THREAD_START_ROUTINE entry, void *arg,
                                                    BOOL suspend, TEB *teb );
 extern SYSTEM_SERVICE_TABLE KeServiceDescriptorTable[4];
