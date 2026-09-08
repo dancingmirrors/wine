@@ -529,11 +529,9 @@ static void bind_video_session_memory(struct wined3d_decoder_vk *decoder_vk)
             ERR("Failed to find suitable memory type.\n");
             goto out;
         }
-        if (requirements[i].memoryRequirements.alignment > WINED3D_ALLOCATOR_MIN_BLOCK_SIZE)
-            ERR("Required alignment is %I64u, but we only support %u.\n",
-                    requirements[i].memoryRequirements.alignment, WINED3D_ALLOCATOR_MIN_BLOCK_SIZE);
         decoder_vk->session_memory = wined3d_context_vk_allocate_memory(context_vk,
-                memory_type_idx, requirements[i].memoryRequirements.size, &decoder_vk->vk_session_memory);
+                memory_type_idx, requirements[i].memoryRequirements.size,
+                requirements[i].memoryRequirements.alignment, &decoder_vk->vk_session_memory);
 
         memory[i].sType = VK_STRUCTURE_TYPE_BIND_VIDEO_SESSION_MEMORY_INFO_KHR;
         memory[i].memoryBindIndex = requirements[i].memoryBindIndex;

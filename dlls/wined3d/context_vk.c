@@ -382,22 +382,27 @@ VkDeviceMemory wined3d_context_vk_allocate_vram_chunk_memory(struct wined3d_cont
 }
 
 struct wined3d_allocator_block *wined3d_context_vk_allocate_memory(struct wined3d_context_vk *context_vk,
-        unsigned int memory_type, VkDeviceSize size, VkDeviceMemory *vk_memory)
+        unsigned int memory_type, VkDeviceSize size, VkDeviceSize alignment, VkDeviceMemory *vk_memory)
 {
     struct wined3d_device_vk *device_vk = wined3d_device_vk(context_vk->c.device);
     struct wined3d_allocator *allocator = &device_vk->allocator;
     struct wined3d_allocator_block *block;
+    VkDeviceSize block_size;
+
+    block_size = max(size, alignment);
 
     wined3d_device_vk_allocator_lock(device_vk);
 
-    if (size > WINED3D_ALLOCATOR_CHUNK_SIZE / 2)
+    if (block_size > WINED3D_ALLOCATOR_CHUNK_SIZE / 2)
     {
+        /* Dedicated allocations start at offset 0, so they satisfy any
+         * alignment the driver can ask for. */
         *vk_memory = wined3d_context_vk_allocate_vram_chunk_memory(context_vk, memory_type, size);
         wined3d_device_vk_allocator_unlock(device_vk);
         return NULL;
     }
 
-    if (!(block = wined3d_allocator_allocate(allocator, &context_vk->c, memory_type, size)))
+    if (!(block = wined3d_allocator_allocate(allocator, &context_vk->c, memory_type, block_size)))
     {
         wined3d_device_vk_allocator_unlock(device_vk);
         *vk_memory = VK_NULL_HANDLE;
@@ -566,8 +571,8 @@ BOOL wined3d_context_vk_create_bo(struct wined3d_context_vk *context_vk, VkDevic
         VK_CALL(vkDestroyBuffer(device_vk->vk_device, bo->vk_buffer, NULL));
         return FALSE;
     }
-    bo->memory = wined3d_context_vk_allocate_memory(context_vk,
-            memory_type_idx, memory_requirements.size, &bo->vk_memory);
+    bo->memory = wined3d_context_vk_allocate_memory(context_vk, memory_type_idx,
+            memory_requirements.size, memory_requirements.alignment, &bo->vk_memory);
     if (!bo->vk_memory)
     {
         ERR("Failed to allocate buffer memory.\n");
@@ -662,7 +667,7 @@ BOOL wined3d_context_vk_create_image(struct wined3d_context_vk *context_vk, VkIm
     }
 
     image->memory = wined3d_context_vk_allocate_memory(context_vk, memory_type_idx,
-            memory_requirements.size, &image->vk_memory);
+            memory_requirements.size, memory_requirements.alignment, &image->vk_memory);
     if (!image->vk_memory)
     {
         ERR("Failed to allocate image memory.\n");
