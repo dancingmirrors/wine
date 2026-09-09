@@ -2941,7 +2941,7 @@ static HRESULT adapter_no3d_init_3d(struct wined3d_device *device)
     context_no3d = &wined3d_device_no3d(device)->context_no3d;
     if (FAILED(hr = wined3d_context_no3d_init(context_no3d, device->swapchains[0])))
     {
-        WARN("Failed to initialise context.\n");
+        WARN("Failed to initialize context.\n");
         return hr;
     }
 
@@ -2952,7 +2952,7 @@ static HRESULT adapter_no3d_init_3d(struct wined3d_device *device)
         return E_FAIL;
     }
 
-    TRACE("Initialised context %p.\n", context_no3d);
+    TRACE("Initialized context %p.\n", context_no3d);
 
     if (!(device->blitter = wined3d_cpu_blitter_create()))
     {
@@ -3046,7 +3046,7 @@ static HRESULT adapter_no3d_create_swapchain(struct wined3d_device *device,
     if (FAILED(hr = wined3d_swapchain_no3d_init(swapchain_no3d, device, desc, state_parent, parent,
             parent_ops)))
     {
-        WARN("Failed to initialise swapchain, hr %#lx.\n", hr);
+        WARN("Failed to initialize swapchain, hr %#lx.\n", hr);
         free(swapchain_no3d);
         return hr;
     }
@@ -3078,7 +3078,7 @@ static HRESULT adapter_no3d_create_buffer(struct wined3d_device *device,
 
     if (FAILED(hr = wined3d_buffer_no3d_init(buffer_no3d, device, desc, data, parent, parent_ops)))
     {
-        WARN("Failed to initialise buffer, hr %#lx.\n", hr);
+        WARN("Failed to initialize buffer, hr %#lx.\n", hr);
         free(buffer_no3d);
         return hr;
     }
@@ -3124,7 +3124,7 @@ static HRESULT adapter_no3d_create_texture(struct wined3d_device *device,
     if (FAILED(hr = wined3d_texture_no3d_init(texture_no3d, device, desc,
             layer_count, level_count, flags, parent, parent_ops)))
     {
-        WARN("Failed to initialise texture, hr %#lx.\n", hr);
+        WARN("Failed to initialize texture, hr %#lx.\n", hr);
         free(texture_no3d);
         return hr;
     }
@@ -3174,7 +3174,7 @@ static HRESULT adapter_no3d_create_rendertarget_view(const struct wined3d_view_d
 
     if (FAILED(hr = wined3d_rendertarget_view_no3d_init(view_no3d, desc, resource, parent, parent_ops)))
     {
-        WARN("Failed to initialise view, hr %#lx.\n", hr);
+        WARN("Failed to initialize view, hr %#lx.\n", hr);
         free(view_no3d);
         return hr;
     }
@@ -3414,12 +3414,65 @@ static BOOL wined3d_adapter_create_output(struct wined3d_adapter *adapter, const
     if (FAILED(hr = wined3d_output_init(&adapter->outputs[adapter->output_count],
             adapter->output_count, adapter, output_name)))
     {
-        ERR("Failed to initialise output %s, hr %#lx.\n", wine_dbgstr_w(output_name), hr);
+        ERR("Failed to initialize output %s, hr %#lx.\n", wine_dbgstr_w(output_name), hr);
         return FALSE;
     }
 
     ++adapter->output_count;
-    TRACE("Initialised output %s.\n", wine_dbgstr_w(output_name));
+    TRACE("Initialized output %s.\n", wine_dbgstr_w(output_name));
+    return TRUE;
+}
+
+static BOOL wined3d_adapter_owns_output(const struct wined3d_adapter *adapter, const WCHAR *device_name)
+{
+    D3DKMT_OPENADAPTERFROMGDIDISPLAYNAME open_adapter_desc;
+    D3DKMT_CLOSEADAPTER close_adapter_desc;
+    BOOL ret;
+
+    lstrcpyW(open_adapter_desc.DeviceName, device_name);
+    if (D3DKMTOpenAdapterFromGdiDisplayName(&open_adapter_desc))
+    {
+        WARN("Failed to open adapter for %s.\n", wine_dbgstr_w(device_name));
+        return FALSE;
+    }
+
+    ret = !memcmp(&open_adapter_desc.AdapterLuid, &adapter->luid, sizeof(adapter->luid));
+    close_adapter_desc.hAdapter = open_adapter_desc.hAdapter;
+    D3DKMTCloseAdapter(&close_adapter_desc);
+    return ret;
+}
+
+static BOOL wined3d_adapter_init_outputs(struct wined3d_adapter *adapter, BOOL match_gpu)
+{
+    unsigned int output_idx = 0, primary_idx = 0;
+    DISPLAY_DEVICEW display_device;
+
+    display_device.cb = sizeof(display_device);
+    while (EnumDisplayDevicesW(NULL, output_idx++, &display_device, 0))
+    {
+        if (!(display_device.StateFlags & DISPLAY_DEVICE_ATTACHED_TO_DESKTOP))
+            continue;
+
+        if (match_gpu && !wined3d_adapter_owns_output(adapter, display_device.DeviceName))
+            continue;
+
+        if (display_device.StateFlags & DISPLAY_DEVICE_PRIMARY_DEVICE)
+            primary_idx = adapter->output_count;
+
+        if (!wined3d_adapter_create_output(adapter, display_device.DeviceName))
+            return FALSE;
+    }
+    TRACE("Initialized %Iu outputs for adapter %p.\n", adapter->output_count, adapter);
+
+    if (primary_idx)
+    {
+        struct wined3d_output tmp = adapter->outputs[0];
+        adapter->outputs[0] = adapter->outputs[primary_idx];
+        adapter->outputs[0].ordinal = 0;
+        adapter->outputs[primary_idx] = tmp;
+        adapter->outputs[primary_idx].ordinal = primary_idx;
+    }
+
     return TRUE;
 }
 
@@ -3427,9 +3480,8 @@ BOOL wined3d_adapter_init(struct wined3d_adapter *adapter, unsigned int ordinal,
         const struct wined3d_adapter_ops *adapter_ops)
 {
     D3DKMT_OPENADAPTERFROMLUID open_adapter_desc;
-    unsigned int output_idx = 0, primary_idx = 0;
     D3DKMT_CLOSEADAPTER close_adapter_desc;
-    DISPLAY_DEVICEW display_device;
+    unsigned int output_idx;
     BOOL ret = FALSE;
 
     adapter->ordinal = ordinal;
@@ -3456,30 +3508,11 @@ BOOL wined3d_adapter_init(struct wined3d_adapter *adapter, unsigned int ordinal,
         return FALSE;
     adapter->kmt_adapter = open_adapter_desc.hAdapter;
 
-    display_device.cb = sizeof(display_device);
-    while (EnumDisplayDevicesW(NULL, output_idx++, &display_device, 0))
-    {
-        /* Detached outputs are not enumerated */
-        if (!(display_device.StateFlags & DISPLAY_DEVICE_ATTACHED_TO_DESKTOP))
-            continue;
+    if (!wined3d_adapter_init_outputs(adapter, TRUE))
+        goto done;
 
-        if (display_device.StateFlags & DISPLAY_DEVICE_PRIMARY_DEVICE)
-            primary_idx = adapter->output_count;
-
-        if (!wined3d_adapter_create_output(adapter, display_device.DeviceName))
-            goto done;
-    }
-    TRACE("Initialised %Iu outputs for adapter %p.\n", adapter->output_count, adapter);
-
-    /* Make the primary output first */
-    if (primary_idx)
-    {
-        struct wined3d_output tmp = adapter->outputs[0];
-        adapter->outputs[0] = adapter->outputs[primary_idx];
-        adapter->outputs[0].ordinal = 0;
-        adapter->outputs[primary_idx] = tmp;
-        adapter->outputs[primary_idx].ordinal = primary_idx;
-    }
+    if (!adapter->output_count && !ordinal && !wined3d_adapter_init_outputs(adapter, FALSE))
+        goto done;
 
     memset(&adapter->driver_uuid, 0, sizeof(adapter->driver_uuid));
     memset(&adapter->device_uuid, 0, sizeof(adapter->device_uuid));
@@ -3499,25 +3532,6 @@ done:
     return ret;
 }
 
-static struct wined3d_adapter *wined3d_adapter_create(unsigned int ordinal, DWORD wined3d_creation_flags)
-{
-    if (wined3d_creation_flags & WINED3D_NO3D)
-        return wined3d_adapter_no3d_create(ordinal, wined3d_creation_flags);
-
-    if (wined3d_settings.renderer == WINED3D_RENDERER_VULKAN)
-    {
-        struct wined3d_adapter *adapter;
-
-        if ((adapter = wined3d_adapter_vk_create(ordinal, wined3d_creation_flags)))
-            return adapter;
-
-        ERR_(winediag)("The Vulkan renderer was requested but is unavailable. "
-             "Falling back to the OpenGL renderer.\n");
-    }
-
-    return wined3d_adapter_gl_create(ordinal, wined3d_creation_flags);
-}
-
 static void STDMETHODCALLTYPE wined3d_null_wined3d_object_destroyed(void *parent) {}
 
 const struct wined3d_parent_ops wined3d_null_parent_ops =
@@ -3527,17 +3541,42 @@ const struct wined3d_parent_ops wined3d_null_parent_ops =
 
 HRESULT wined3d_init(struct wined3d *wined3d, uint32_t flags)
 {
+    unsigned int count = 0;
+
     wined3d->ref = 1;
     wined3d->flags = flags;
 
-    TRACE("Initialising adapters.\n");
+    TRACE("Initializing adapters.\n");
 
-    if (!(wined3d->adapters[0] = wined3d_adapter_create(0, flags)))
+    if (flags & WINED3D_NO3D)
     {
-        WARN("Failed to create adapter.\n");
-        return E_FAIL;
+        if (!(wined3d->adapters[0] = wined3d_adapter_no3d_create(0, flags)))
+        {
+            WARN("Failed to create adapter.\n");
+            return E_FAIL;
+        }
+        wined3d->adapter_count = 1;
+
+        return WINED3D_OK;
     }
-    wined3d->adapter_count = 1;
+
+    if (wined3d_settings.renderer == WINED3D_RENDERER_VULKAN
+            && !(count = wined3d_adapter_vk_create_adapters(wined3d->adapters, WINED3D_MAX_ADAPTERS, flags)))
+        ERR_(winediag)("The Vulkan renderer was requested but is unavailable. "
+             "Falling back to the OpenGL renderer.\n");
+
+    if (!count)
+    {
+        if (!(wined3d->adapters[0] = wined3d_adapter_gl_create(0, flags)))
+        {
+            WARN("Failed to create adapter.\n");
+            return E_FAIL;
+        }
+        count = 1;
+    }
+
+    TRACE("Initialized %u adapters.\n", count);
+    wined3d->adapter_count = count;
 
     return WINED3D_OK;
 }

@@ -2613,8 +2613,8 @@ BOOL wined3d_adapter_init(struct wined3d_adapter *adapter, unsigned int ordinal,
 void wined3d_adapter_cleanup(struct wined3d_adapter *adapter);
 BOOL wined3d_get_primary_adapter_luid(LUID *luid);
 
-struct wined3d_adapter *wined3d_adapter_vk_create(unsigned int ordinal,
-        unsigned int wined3d_creation_flags);
+unsigned int wined3d_adapter_vk_create_adapters(struct wined3d_adapter **adapters,
+        unsigned int max_adapters, unsigned int wined3d_creation_flags);
 
 struct wined3d_adapter *wined3d_adapter_gl_create(unsigned int ordinal,
         unsigned int wined3d_creation_flags);
@@ -2752,12 +2752,14 @@ struct wined3d_ffp_vs
 void wined3d_ffp_get_vs_settings(const struct wined3d_state *state, const struct wined3d_stream_info *si,
         const struct wined3d_d3d_info *d3d_info, struct wined3d_ffp_vs_settings *settings);
 
+#define WINED3D_MAX_ADAPTERS 16
+
 struct wined3d
 {
     LONG ref;
     unsigned int flags;
     unsigned int adapter_count;
-    struct wined3d_adapter *adapters[1];
+    struct wined3d_adapter *adapters[WINED3D_MAX_ADAPTERS];
 };
 
 BOOL wined3d_filter_messages(HWND window, BOOL filter);

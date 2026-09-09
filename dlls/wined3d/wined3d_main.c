@@ -144,7 +144,7 @@ struct wined3d * CDECL wined3d_create(uint32_t flags)
     struct wined3d *object;
     HRESULT hr;
 
-    if (!(object = calloc(1, FIELD_OFFSET(struct wined3d, adapters[1]))))
+    if (!(object = calloc(1, sizeof(*object))))
     {
         ERR("Failed to allocate wined3d object memory.\n");
         return NULL;

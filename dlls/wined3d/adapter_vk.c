@@ -174,16 +174,57 @@ static void wined3d_unload_vulkan(struct wined3d_vk_info *vk_info)
     }
 }
 
+static BOOL wined3d_init_vulkan(struct wined3d_vk_info *vk_info);
+
+static struct wined3d_vk_info wined3d_vk_instance;
+static unsigned int wined3d_vk_instance_ref;
+
+static BOOL wined3d_vk_instance_acquire(struct wined3d_vk_info *vk_info)
+{
+    BOOL ret = TRUE;
+
+    wined3d_mutex_lock();
+
+    if (!wined3d_vk_instance_ref && !wined3d_init_vulkan(&wined3d_vk_instance))
+    {
+        WARN("Failed to initialize Vulkan.\n");
+        ret = FALSE;
+    }
+    else
+    {
+        ++wined3d_vk_instance_ref;
+        *vk_info = wined3d_vk_instance;
+    }
+
+    wined3d_mutex_unlock();
+
+    return ret;
+}
+
+static void wined3d_vk_instance_release(void)
+{
+    struct wined3d_vk_info *vk_info = &wined3d_vk_instance;
+
+    wined3d_mutex_lock();
+
+    if (!--wined3d_vk_instance_ref)
+    {
+        VK_CALL(vkDestroyInstance(vk_info->instance, NULL));
+        wined3d_unload_vulkan(vk_info);
+        memset(vk_info, 0, sizeof(*vk_info));
+    }
+
+    wined3d_mutex_unlock();
+}
+
 static void adapter_vk_destroy(struct wined3d_adapter *adapter)
 {
     struct wined3d_adapter_vk *adapter_vk = wined3d_adapter_vk(adapter);
-    struct wined3d_vk_info *vk_info = &adapter_vk->vk_info;
 
-    VK_CALL(vkDestroyInstance(vk_info->instance, NULL));
-    wined3d_unload_vulkan(vk_info);
     wined3d_adapter_cleanup(&adapter_vk->a);
     free(adapter_vk->device_extensions);
     free(adapter_vk);
+    wined3d_vk_instance_release();
 }
 
 static HRESULT wined3d_select_vulkan_queue_family(const struct wined3d_adapter_vk *adapter_vk,
@@ -495,7 +536,7 @@ static HRESULT adapter_vk_create_device(struct wined3d *wined3d, const struct wi
     if (!wined3d_allocator_init(&device_vk->allocator,
             adapter_vk->memory_properties.memoryTypeCount, &wined3d_allocator_vk_ops))
     {
-        WARN("Failed to initialise allocator.\n");
+        WARN("Failed to initialize allocator.\n");
         hr = E_FAIL;
         goto fail;
     }
@@ -677,7 +718,7 @@ static HRESULT adapter_vk_init_3d(struct wined3d_device *device)
     context_vk = &device_vk->context_vk;
     if (FAILED(hr = wined3d_context_vk_init(context_vk, device->swapchains[0])))
     {
-        WARN("Failed to initialise context.\n");
+        WARN("Failed to initialize context.\n");
         return hr;
     }
 
@@ -697,7 +738,7 @@ static HRESULT adapter_vk_init_3d(struct wined3d_device *device)
         return E_FAIL;
     }
 
-    TRACE("Initialised context %p.\n", context_vk);
+    TRACE("Initialized context %p.\n", context_vk);
 
     if (!(device_vk->d.blitter = wined3d_cpu_blitter_create()))
     {
@@ -1303,7 +1344,7 @@ static HRESULT adapter_vk_create_swapchain(struct wined3d_device *device,
     if (FAILED(hr = wined3d_swapchain_vk_init(swapchain_vk, device, desc, state_parent, parent,
             parent_ops)))
     {
-        WARN("Failed to initialise swapchain, hr %#lx.\n", hr);
+        WARN("Failed to initialize swapchain, hr %#lx.\n", hr);
         free(swapchain_vk);
         return hr;
     }
@@ -1354,7 +1395,7 @@ static HRESULT adapter_vk_create_buffer(struct wined3d_device *device,
 
     if (FAILED(hr = wined3d_buffer_vk_init(buffer_vk, device, desc, data, parent, parent_ops)))
     {
-        WARN("Failed to initialise buffer, hr %#lx.\n", hr);
+        WARN("Failed to initialize buffer, hr %#lx.\n", hr);
         free(buffer_vk);
         return hr;
     }
@@ -1401,7 +1442,7 @@ static HRESULT adapter_vk_create_texture(struct wined3d_device *device,
     if (FAILED(hr = wined3d_texture_vk_init(texture_vk, device, desc,
             layer_count, level_count, flags, parent, parent_ops)))
     {
-        WARN("Failed to initialise texture, hr %#lx.\n", hr);
+        WARN("Failed to initialize texture, hr %#lx.\n", hr);
         free(texture_vk);
         return hr;
     }
@@ -1452,7 +1493,7 @@ static HRESULT adapter_vk_create_rendertarget_view(const struct wined3d_view_des
 
     if (FAILED(hr = wined3d_rendertarget_view_vk_init(view_vk, desc, resource, parent, parent_ops)))
     {
-        WARN("Failed to initialise view, hr %#lx.\n", hr);
+        WARN("Failed to initialize view, hr %#lx.\n", hr);
         free(view_vk);
         return hr;
     }
@@ -1590,7 +1631,7 @@ static HRESULT adapter_vk_create_shader_resource_view(const struct wined3d_view_
 
     if (FAILED(hr = wined3d_shader_resource_view_vk_init(view_vk, desc, resource, parent, parent_ops)))
     {
-        WARN("Failed to initialise view, hr %#lx.\n", hr);
+        WARN("Failed to initialize view, hr %#lx.\n", hr);
         free(view_vk);
         return hr;
     }
@@ -1635,7 +1676,7 @@ static HRESULT adapter_vk_create_unordered_access_view(const struct wined3d_view
 
     if (FAILED(hr = wined3d_unordered_access_view_vk_init(view_vk, desc, resource, parent, parent_ops)))
     {
-        WARN("Failed to initialise view, hr %#lx.\n", hr);
+        WARN("Failed to initialize view, hr %#lx.\n", hr);
         free(view_vk);
         return hr;
     }
@@ -1680,7 +1721,7 @@ static HRESULT adapter_vk_create_video_decoder_output_view(const struct wined3d_
 
     if (FAILED(hr = wined3d_decoder_output_view_vk_init(view_vk, desc, texture, parent, parent_ops)))
     {
-        WARN("Failed to initialise view, hr %#lx.\n", hr);
+        WARN("Failed to initialize view, hr %#lx.\n", hr);
         free(view_vk);
         return hr;
     }
@@ -2151,36 +2192,89 @@ fail:
     return FALSE;
 }
 
-static VkPhysicalDevice get_vulkan_physical_device(struct wined3d_vk_info *vk_info)
+static void get_physical_device_id_properties(const struct wined3d_vk_info *vk_info,
+        VkPhysicalDevice physical_device, VkPhysicalDeviceProperties2 *properties2,
+        VkPhysicalDeviceIDProperties *id_properties)
 {
-    VkPhysicalDevice physical_devices[1];
+    memset(id_properties, 0, sizeof(*id_properties));
+    id_properties->sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES;
+    memset(properties2, 0, sizeof(*properties2));
+    properties2->sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+    properties2->pNext = id_properties;
+
+    if (vk_info->vk_ops.vkGetPhysicalDeviceProperties2)
+        VK_CALL(vkGetPhysicalDeviceProperties2(physical_device, properties2));
+    else
+        VK_CALL(vkGetPhysicalDeviceProperties(physical_device, &properties2->properties));
+}
+
+static unsigned int get_physical_device_rank(const struct wined3d_vk_info *vk_info,
+        VkPhysicalDevice physical_device, const LUID *primary_luid)
+{
+    VkPhysicalDeviceIDProperties id_properties;
+    VkPhysicalDeviceProperties2 properties2;
+
+    get_physical_device_id_properties(vk_info, physical_device, &properties2, &id_properties);
+
+    if (primary_luid && id_properties.deviceLUIDValid
+            && !memcmp(id_properties.deviceLUID, primary_luid, sizeof(*primary_luid)))
+        return 0;
+
+    return properties2.properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU ? 2 : 1;
+}
+
+static unsigned int get_vulkan_physical_devices(const struct wined3d_vk_info *vk_info,
+        VkPhysicalDevice *physical_devices, unsigned int max_devices)
+{
+    unsigned int ranks[WINED3D_MAX_ADAPTERS], i, j;
+    LUID primary_luid, *luid = NULL;
     uint32_t count;
     VkResult vr;
 
     if ((vr = VK_CALL(vkEnumeratePhysicalDevices(vk_info->instance, &count, NULL))) < 0)
     {
         WARN("Failed to enumerate physical devices, vr %s.\n", wined3d_debug_vkresult(vr));
-        return VK_NULL_HANDLE;
+        return 0;
     }
     if (!count)
     {
         WARN("No physical device.\n");
-        return VK_NULL_HANDLE;
+        return 0;
     }
-    if (count > 1)
+    if (max_devices > ARRAY_SIZE(ranks))
+        max_devices = ARRAY_SIZE(ranks);
+    if (count > max_devices)
     {
-        /* TODO: Create wined3d_adapter for each device. */
-        FIXME("Multiple physical devices available.\n");
-        count = 1;
+        FIXME("Using %u of %u physical devices.\n", max_devices, count);
+        count = max_devices;
     }
 
     if ((vr = VK_CALL(vkEnumeratePhysicalDevices(vk_info->instance, &count, physical_devices))) < 0)
     {
         WARN("Failed to get physical devices, vr %s.\n", wined3d_debug_vkresult(vr));
-        return VK_NULL_HANDLE;
+        return 0;
     }
 
-    return physical_devices[0];
+    if (wined3d_get_primary_adapter_luid(&primary_luid))
+        luid = &primary_luid;
+
+    for (i = 0; i < count; ++i)
+        ranks[i] = get_physical_device_rank(vk_info, physical_devices[i], luid);
+    for (i = 1; i < count; ++i)
+    {
+        VkPhysicalDevice physical_device = physical_devices[i];
+        unsigned int rank = ranks[i];
+
+        for (j = i; j && ranks[j - 1] > rank; --j)
+        {
+            physical_devices[j] = physical_devices[j - 1];
+            ranks[j] = ranks[j - 1];
+        }
+        physical_devices[j] = physical_device;
+        ranks[j] = rank;
+    }
+
+    return count;
 }
 
 static enum wined3d_display_driver guess_display_driver(enum wined3d_pci_vendor vendor)
@@ -2576,8 +2670,8 @@ done:
     return success;
 }
 
-static BOOL wined3d_adapter_vk_init(struct wined3d_adapter_vk *adapter_vk,
-        unsigned int ordinal, unsigned int wined3d_creation_flags)
+static BOOL wined3d_adapter_vk_init(struct wined3d_adapter_vk *adapter_vk, unsigned int ordinal,
+        VkPhysicalDevice physical_device, unsigned int wined3d_creation_flags)
 {
     struct wined3d_vk_info *vk_info = &adapter_vk->vk_info;
     struct wined3d_adapter *adapter = &adapter_vk->a;
@@ -2585,37 +2679,26 @@ static BOOL wined3d_adapter_vk_init(struct wined3d_adapter_vk *adapter_vk,
     VkPhysicalDeviceProperties2 properties2;
     LUID primary_luid, *luid = NULL;
 
-    TRACE("adapter_vk %p, ordinal %u, wined3d_creation_flags %#x.\n",
-            adapter_vk, ordinal, wined3d_creation_flags);
+    TRACE("adapter_vk %p, ordinal %u, physical_device %p, wined3d_creation_flags %#x.\n",
+            adapter_vk, ordinal, physical_device, wined3d_creation_flags);
 
-    if (!wined3d_init_vulkan(vk_info))
-    {
-        WARN("Failed to initialize Vulkan.\n");
+    if (!wined3d_vk_instance_acquire(vk_info))
         return FALSE;
-    }
 
-    if (!(adapter_vk->physical_device = get_vulkan_physical_device(vk_info)))
-        goto fail_vulkan;
+    adapter_vk->physical_device = physical_device;
 
     if (!wined3d_adapter_vk_init_device_extensions(adapter_vk))
         goto fail_vulkan;
 
-    memset(&id_properties, 0, sizeof(id_properties));
-    id_properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES;
-    properties2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
-    properties2.pNext = &id_properties;
-
-    if (vk_info->vk_ops.vkGetPhysicalDeviceProperties2)
-        VK_CALL(vkGetPhysicalDeviceProperties2(adapter_vk->physical_device, &properties2));
-    else
-        VK_CALL(vkGetPhysicalDeviceProperties(adapter_vk->physical_device, &properties2.properties));
+    get_physical_device_id_properties(vk_info, physical_device, &properties2, &id_properties);
     adapter_vk->device_limits = properties2.properties.limits;
+    TRACE("Initialising adapter for device %s.\n", debugstr_a(properties2.properties.deviceName));
 
     VK_CALL(vkGetPhysicalDeviceMemoryProperties(adapter_vk->physical_device, &adapter_vk->memory_properties));
 
     if (id_properties.deviceLUIDValid)
         luid = (LUID *)id_properties.deviceLUID;
-    else if (ordinal == 0 && wined3d_get_primary_adapter_luid(&primary_luid))
+    else if (!ordinal && wined3d_get_primary_adapter_luid(&primary_luid))
         luid = &primary_luid;
 
     if (!wined3d_adapter_init(adapter, ordinal, luid, &wined3d_adapter_vk_ops))
@@ -2651,20 +2734,19 @@ fail:
     wined3d_adapter_cleanup(adapter);
     free(adapter_vk->device_extensions);
 fail_vulkan:
-    VK_CALL(vkDestroyInstance(vk_info->instance, NULL));
-    wined3d_unload_vulkan(vk_info);
+    wined3d_vk_instance_release();
     return FALSE;
 }
 
-struct wined3d_adapter *wined3d_adapter_vk_create(unsigned int ordinal,
-        unsigned int wined3d_creation_flags)
+static struct wined3d_adapter *wined3d_adapter_vk_create(unsigned int ordinal,
+        VkPhysicalDevice physical_device, unsigned int wined3d_creation_flags)
 {
     struct wined3d_adapter_vk *adapter_vk;
 
     if (!(adapter_vk = calloc(1, sizeof(*adapter_vk))))
         return NULL;
 
-    if (!wined3d_adapter_vk_init(adapter_vk, ordinal, wined3d_creation_flags))
+    if (!wined3d_adapter_vk_init(adapter_vk, ordinal, physical_device, wined3d_creation_flags))
     {
         free(adapter_vk);
         return NULL;
@@ -2673,4 +2755,40 @@ struct wined3d_adapter *wined3d_adapter_vk_create(unsigned int ordinal,
     TRACE("Created adapter %p.\n", adapter_vk);
 
     return &adapter_vk->a;
+}
+
+unsigned int wined3d_adapter_vk_create_adapters(struct wined3d_adapter **adapters,
+        unsigned int max_adapters, unsigned int wined3d_creation_flags)
+{
+    VkPhysicalDevice physical_devices[WINED3D_MAX_ADAPTERS];
+    struct wined3d_vk_info instance_vk_info;
+    const struct wined3d_vk_info *vk_info = &instance_vk_info;
+    unsigned int count, i, adapter_count = 0;
+    struct wined3d_adapter *adapter;
+
+    TRACE("adapters %p, max_adapters %u, wined3d_creation_flags %#x.\n",
+            adapters, max_adapters, wined3d_creation_flags);
+
+    if (max_adapters > ARRAY_SIZE(physical_devices))
+        max_adapters = ARRAY_SIZE(physical_devices);
+
+    if (!wined3d_vk_instance_acquire(&instance_vk_info))
+        return 0;
+
+    count = get_vulkan_physical_devices(vk_info, physical_devices, max_adapters);
+
+    for (i = 0; i < count; ++i)
+    {
+        if (!(adapter = wined3d_adapter_vk_create(adapter_count, physical_devices[i], wined3d_creation_flags)))
+        {
+            WARN("Failed to create adapter for physical device %p.\n", physical_devices[i]);
+            continue;
+        }
+
+        adapters[adapter_count++] = adapter;
+    }
+
+    wined3d_vk_instance_release();
+
+    return adapter_count;
 }
