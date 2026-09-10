@@ -62,10 +62,6 @@
 #include <net/if_types.h>
 #endif
 
-#ifdef HAVE_LINUX_WIRELESS_H
-#include <linux/wireless.h>
-#endif
-
 #include <pthread.h>
 
 #include "ntstatus.h"
@@ -126,6 +122,20 @@ static struct if_entry *find_entry_from_luid( const NET_LUID *luid )
 }
 
 #if defined (SIOCGIFHWADDR) && defined (HAVE_STRUCT_IFREQ_IFR_HWADDR)
+
+#ifdef __linux__
+/* warning: `wine_sechost_se' uses wireless extensions which will stop working for Wi-Fi 7 hardware; use nl80211 */
+static BOOL if_is_wireless( const char *name )
+{
+    char path[sizeof("/sys/class/net//phy80211") + IFNAMSIZ];
+
+    snprintf( path, sizeof(path), "/sys/class/net/%s/wireless", name );
+    if (!access( path, F_OK )) return TRUE;
+    snprintf( path, sizeof(path), "/sys/class/net/%s/phy80211", name );
+    return !access( path, F_OK );
+}
+#endif
+
 static NTSTATUS if_get_physical( const char *name, UINT *type, IF_PHYSICAL_ADDRESS *phys_addr )
 {
     int fd, size, i;
@@ -176,18 +186,11 @@ static NTSTATUS if_get_physical( const char *name, UINT *type, IF_PHYSICAL_ADDRE
     if (*type == MIB_IF_TYPE_OTHER && !ioctl( fd, SIOCGIFFLAGS, &ifr ) && ifr.ifr_flags & IFF_POINTOPOINT)
         *type = MIB_IF_TYPE_PPP;
 
-#ifdef HAVE_LINUX_WIRELESS_H
-    if (*type == MIB_IF_TYPE_ETHERNET)
+#ifdef __linux__
+    if (*type == MIB_IF_TYPE_ETHERNET && if_is_wireless( name ))
     {
-        struct iwreq pwrq;
-
-        memset( &pwrq, 0, sizeof(pwrq) );
-        memcpy( pwrq.ifr_name, name, size );
-        if (ioctl( fd, SIOCGIWNAME, &pwrq ) != -1)
-        {
-            TRACE( "iface %s, wireless protocol %s.\n", debugstr_a(name), debugstr_a(pwrq.u.name) );
-            *type = IF_TYPE_IEEE80211;
-        }
+        TRACE( "iface %s is wireless.\n", debugstr_a(name) );
+        *type = IF_TYPE_IEEE80211;
     }
 #endif
 
