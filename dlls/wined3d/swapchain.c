@@ -1221,6 +1221,17 @@ static void wined3d_swapchain_vk_rotate(struct wined3d_swapchain *swapchain, str
     device_invalidate_state(swapchain->device, STATE_FRAMEBUFFER);
 }
 
+static bool swapchain_vk_size_changed(const struct wined3d_swapchain_vk *swapchain_vk)
+{
+    RECT client_rect;
+
+    if (!GetClientRect(swapchain_vk->s.win_handle, &client_rect))
+        return false;
+
+    return (UINT)(client_rect.right - client_rect.left) != swapchain_vk->width
+            || (UINT)(client_rect.bottom - client_rect.top) != swapchain_vk->height;
+}
+
 static void swapchain_vk_present(struct wined3d_swapchain *swapchain, const RECT *src_rect,
         const RECT *dst_rect, unsigned int swap_interval, uint32_t flags)
 {
@@ -1244,7 +1255,10 @@ static void swapchain_vk_present(struct wined3d_swapchain *swapchain, const RECT
         {
             if (vr == VK_ERROR_OUT_OF_DATE_KHR || vr == VK_SUBOPTIMAL_KHR)
             {
-                if (FAILED(hr = wined3d_swapchain_vk_recreate(swapchain_vk)))
+                if (vr == VK_SUBOPTIMAL_KHR && !swapchain_vk_size_changed(swapchain_vk))
+                    WARN_(d3d_perf)("Keeping suboptimal swapchain %p, extent %ux%u is current.\n",
+                            swapchain_vk, swapchain_vk->width, swapchain_vk->height);
+                else if (FAILED(hr = wined3d_swapchain_vk_recreate(swapchain_vk)))
                     ERR("Failed to recreate swapchain, hr %#lx.\n", hr);
                 else if (vr == VK_ERROR_OUT_OF_DATE_KHR && (vr = wined3d_swapchain_vk_blit(
                         swapchain_vk, context_vk, src_rect, dst_rect, swap_interval)))
