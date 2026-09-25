@@ -178,6 +178,12 @@ struct asf_reader
     IWMReaderCallback *callback;
     IWMReader *reader;
 
+    /* Segment requested through IMediaSeeking. The reader is started from
+     * its start position, and the delivered sample times are relative to it. */
+    LONGLONG duration;
+    LONGLONG segment_start, segment_stop;
+    double segment_rate;
+
     UINT stream_count;
     struct asf_stream streams[16];
 };
@@ -279,13 +285,22 @@ static HRESULT asf_stream_query_interface(struct strmbase_pin *iface, REFIID iid
     return S_OK;
 }
 
-static HRESULT asf_reader_start_stream(struct asf_reader *filter, LONGLONG start, LONGLONG duration, float rate)
+static HRESULT asf_reader_start_stream(struct asf_reader *filter)
 {
+    LONGLONG start = max(filter->segment_start, 0), stop = filter->segment_stop, duration = 0;
     HRESULT hr;
+
+    /* Only limit the duration when the stop position was moved before the end
+     * of the file, otherwise let the reader play until the end. */
+    if (stop > start && stop < filter->duration)
+        duration = stop - start;
+
+    TRACE("filter %p, start %s, duration %s, rate %f.\n", filter, debugstr_time(start),
+            debugstr_time(duration), filter->segment_rate);
 
     EnterCriticalSection(&filter->status_cs);
 
-    if (SUCCEEDED(hr = IWMReader_Start(filter->reader, start, duration, rate, NULL)))
+    if (SUCCEEDED(hr = IWMReader_Start(filter->reader, start, duration, filter->segment_rate, NULL)))
     {
         filter->status = -1;
         while (filter->status != WMT_STARTED)
@@ -322,49 +337,108 @@ static inline struct asf_stream *impl_from_IMediaSeeking(IMediaSeeking *iface)
     return CONTAINING_RECORD(iface, struct asf_stream, seek.IMediaSeeking_iface);
 }
 
+static void asf_reader_set_segment(struct asf_reader *filter, const struct SourceSeeking *seek)
+{
+    filter->segment_start = seek->llCurrent;
+    filter->segment_stop = seek->llStop;
+    filter->segment_rate = seek->dRate;
+}
+
 static HRESULT WINAPI media_seeking_ChangeCurrent(IMediaSeeking *iface)
 {
     struct asf_stream *stream = impl_from_IMediaSeeking(iface);
     struct asf_reader *filter = asf_reader_from_asf_stream(stream);
     struct SourceSeeking *seek = &stream->seek;
-    HRESULT hr;
+    HRESULT hr, pin_hr;
+    BOOL started;
     UINT i;
 
-    TRACE("iface %p.\n", iface);
+    TRACE("iface %p, current %s, stop %s, rate %f.\n", iface, debugstr_time(seek->llCurrent),
+            debugstr_time(seek->llStop), seek->dRate);
 
-    /* Send begin flush commands downstream. */
-    for (i = 0; i < filter->stream_count; ++i)
+    /* Serialize with the filter state changes. */
+    EnterCriticalSection(&filter->filter.filter_cs);
+
+    EnterCriticalSection(&filter->status_cs);
+    started = filter->status == WMT_STARTED;
+    LeaveCriticalSection(&filter->status_cs);
+
+    /* The reader only runs between the filter's Pause / Run and Stop. While
+     * stopped, the output allocators are decommitted and the pins may get
+     * disconnected at any time, so the new position is only recorded here and
+     * used the next time the stream is initialized. */
+    if (!started)
     {
-        if (FAILED(IPin_BeginFlush(stream->source.pin.peer)))
-            WARN("Failed to BeginFlush for stream %u.\n", i);
+        asf_reader_set_segment(filter, seek);
+        LeaveCriticalSection(&filter->filter.filter_cs);
+        return S_OK;
     }
 
-    /* Stop the reader. */
-    hr = asf_reader_stop_stream(filter);
-
-    /* Send end flush commands downstream. */
+    /* Flush every connected pin, so that the reader's delivery threads return
+     * from a possibly blocking downstream Receive, and the reader can be
+     * stopped without deadlocking. */
     for (i = 0; i < filter->stream_count; ++i)
     {
-        if (FAILED(IPin_EndFlush(stream->source.pin.peer)))
-            WARN("Failed to EndFlush for stream %u.\n", i);
+        IPin *peer = filter->streams[i].source.pin.peer;
+
+        if (peer && FAILED(pin_hr = IPin_BeginFlush(peer)))
+            WARN("Failed to begin flush for stream %u, hr %#lx.\n", i, pin_hr);
     }
 
-    /* Start the reader. */
-    if (hr == S_OK)
-        hr = asf_reader_start_stream(filter, seek->llCurrent, seek->llDuration, seek->dRate);
+    if (FAILED(hr = asf_reader_stop_stream(filter)))
+        WARN("Failed to stop WMReader %p, hr %#lx.\n", filter->reader, hr);
+
+    asf_reader_set_segment(filter, seek);
+
+    for (i = 0; i < filter->stream_count; ++i)
+    {
+        IPin *peer = filter->streams[i].source.pin.peer;
+
+        if (peer && FAILED(pin_hr = IPin_EndFlush(peer)))
+            WARN("Failed to end flush for stream %u, hr %#lx.\n", i, pin_hr);
+    }
+
+    if (SUCCEEDED(hr))
+    {
+        /* Restart the reader in a new segment from the requested position. */
+        for (i = 0; i < filter->stream_count; ++i)
+        {
+            IPin *peer = filter->streams[i].source.pin.peer;
+
+            if (peer && FAILED(pin_hr = IPin_NewSegment(peer, filter->segment_start,
+                    filter->segment_stop, filter->segment_rate)))
+                WARN("Failed to start new segment for stream %u, hr %#lx.\n", i, pin_hr);
+        }
+
+        if (FAILED(hr = asf_reader_start_stream(filter)))
+            WARN("Failed to start WMReader %p, hr %#lx.\n", filter->reader, hr);
+    }
+
+    LeaveCriticalSection(&filter->filter.filter_cs);
 
     return hr;
 }
 
 static HRESULT WINAPI media_seeking_ChangeStop(IMediaSeeking *iface)
 {
-    FIXME("iface %p stub!\n", iface);
+    struct asf_stream *stream = impl_from_IMediaSeeking(iface);
+    struct asf_reader *filter = asf_reader_from_asf_stream(stream);
+
+    TRACE("iface %p, stop %s.\n", iface, debugstr_time(stream->seek.llStop));
+
+    /* Applied the next time the reader is started. */
+    filter->segment_stop = stream->seek.llStop;
     return S_OK;
 }
 
 static HRESULT WINAPI media_seeking_ChangeRate(IMediaSeeking *iface)
 {
-    FIXME("iface %p stub!\n", iface);
+    struct asf_stream *stream = impl_from_IMediaSeeking(iface);
+    struct asf_reader *filter = asf_reader_from_asf_stream(stream);
+
+    FIXME("iface %p, rate %f semi-stub!\n", iface, stream->seek.dRate);
+
+    filter->segment_rate = stream->seek.dRate;
     return S_OK;
 }
 
@@ -389,7 +463,7 @@ static ULONG WINAPI media_seeking_Release(IMediaSeeking *iface)
 static HRESULT WINAPI media_seeking_SetPositions(IMediaSeeking *iface,
         LONGLONG *current, DWORD current_flags, LONGLONG *stop, DWORD stop_flags)
 {
-    FIXME("iface %p, current %s, current_flags %#lx, stop %s, stop_flags %#lx stub!\n",
+    TRACE("iface %p, current %s, current_flags %#lx, stop %s, stop_flags %#lx.\n",
             iface, current ? debugstr_time(*current) : "<null>", current_flags,
             stop ? debugstr_time(*stop) : "<null>", stop_flags);
     return SourceSeekingImpl_SetPositions(iface, current, current_flags, stop, stop_flags);
@@ -444,6 +518,10 @@ static void asf_reader_destroy(struct strmbase_filter *iface)
     struct asf_reader *filter = impl_from_strmbase_filter(iface);
     struct strmbase_source *source;
 
+    /* Release the reader first: this joins its delivery threads, which
+     * reference the output pins and their allocators. */
+    IWMReader_Release(filter->reader);
+
     while (filter->stream_count--)
     {
         source = &filter->streams[filter->stream_count].source;
@@ -454,7 +532,6 @@ static void asf_reader_destroy(struct strmbase_filter *iface)
 
     free(filter->file_name);
     IWMReaderCallback_Release(filter->callback);
-    IWMReader_Release(filter->reader);
 
     strmbase_filter_cleanup(&filter->filter);
 
@@ -532,8 +609,8 @@ static HRESULT asf_reader_init_stream(struct strmbase_filter *iface)
             break;
         }
 
-        if (FAILED(hr = IPin_NewSegment(stream->source.pin.peer, stream->seek.llCurrent,
-                stream->seek.llStop, stream->seek.dRate)))
+        if (FAILED(hr = IPin_NewSegment(stream->source.pin.peer, filter->segment_start,
+                filter->segment_stop, filter->segment_rate)))
         {
             WARN("Failed to start stream %u new segment, hr %#lx\n", i, hr);
             break;
@@ -559,7 +636,7 @@ static HRESULT asf_reader_init_stream(struct strmbase_filter *iface)
     if (FAILED(hr))
         return hr;
 
-    if (FAILED(hr = asf_reader_start_stream(filter, 0, 0, 1.0)))
+    if (FAILED(hr = asf_reader_start_stream(filter)))
         WARN("Failed to start WMReader %p, hr %#lx\n", filter->reader, hr);
 
     return hr;
@@ -866,6 +943,10 @@ static HRESULT WINAPI reader_callback_OnStatus(IWMReaderCallback *iface, WMT_STA
                 stream->seek.llStop = duration;
             }
             filter->stream_count = stream_count;
+            filter->duration = duration;
+            filter->segment_start = 0;
+            filter->segment_stop = duration;
+            filter->segment_rate = 1.0;
             BaseFilterImpl_IncrementPinVersion(&filter->filter);
 
             EnterCriticalSection(&filter->status_cs);
@@ -915,8 +996,8 @@ static HRESULT WINAPI reader_callback_OnSample(IWMReaderCallback *iface, DWORD o
         QWORD duration, DWORD flags, INSSBuffer *sample, void *context)
 {
     struct asf_reader *filter = impl_from_IWMReaderCallback(iface)->filter;
-    REFERENCE_TIME start_time = time, end_time = time + duration;
     struct asf_stream *stream = filter->streams + output;
+    REFERENCE_TIME start_time, end_time;
     struct buffer *buffer;
     HRESULT hr = S_OK;
 
@@ -933,6 +1014,10 @@ static HRESULT WINAPI reader_callback_OnSample(IWMReaderCallback *iface, DWORD o
         WARN("Unexpected buffer iface %p, discarding.\n", sample);
     else
     {
+        /* Sample times are relative to the start of the current segment. */
+        start_time = (REFERENCE_TIME)time - filter->segment_start;
+        end_time = start_time + duration;
+
         IMediaSample_SetTime(buffer->sample, &start_time, &end_time);
         IMediaSample_SetDiscontinuity(buffer->sample, !!(flags & WM_SF_DISCONTINUITY));
         IMediaSample_SetSyncPoint(buffer->sample, !!(flags & WM_SF_CLEANPOINT));
@@ -1095,6 +1180,7 @@ HRESULT asf_reader_create(IUnknown *outer, IUnknown **out)
     }
 
     for (i = 0; i < ARRAY_SIZE(object->streams); ++i) object->streams[i].index = i;
+    object->segment_rate = 1.0;
     strmbase_filter_init(&object->filter, outer, &CLSID_WMAsfReader, &filter_ops);
     object->IFileSourceFilter_iface.lpVtbl = &file_source_vtbl;
 

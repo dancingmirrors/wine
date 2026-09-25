@@ -113,6 +113,8 @@ struct async_reader
 
     REFERENCE_TIME clock_start;
     LARGE_INTEGER clock_frequency;
+    /* Position in the stream corresponding to clock_start. */
+    QWORD start_time;
 
     HANDLE callback_thread;
     CRITICAL_SECTION callback_cs;
@@ -262,7 +264,7 @@ static DWORD async_reader_get_wait_timeout(struct async_reader *reader, QWORD pt
 
     if (!reader->user_clock)
     {
-        current_time = get_current_time(reader) - reader->clock_start;
+        current_time = reader->start_time + get_current_time(reader) - reader->clock_start;
         timeout = (pts - current_time) / 10000;
     }
 
@@ -674,6 +676,7 @@ static DWORD WINAPI async_reader_callback_thread(void *arg)
                     if (SUCCEEDED(hr))
                     {
                         reader->clock_start = get_current_time(reader);
+                        reader->start_time = op->u.start.start;
 
                         if (FAILED(hr = async_reader_open_all_streams(reader)))
                         {
@@ -1403,7 +1406,7 @@ static HRESULT WINAPI WMReaderAdvanced2_SetOutputSetting(IWMReaderAdvanced6 *ifa
     struct stream *stream;
     HRESULT hr = E_NOTIMPL;
 
-    FIXME("reader %p, output_num %lu, name %s, type %u, value %p, length %u semi-stub!\n",
+    TRACE("reader %p, output_num %lu, name %s, type %u, value %p, length %u.\n",
             reader, output_num, debugstr_w(name), type, value, length);
 
     EnterCriticalSection(&reader->cs);
@@ -1433,6 +1436,8 @@ static HRESULT WINAPI WMReaderAdvanced2_SetOutputSetting(IWMReaderAdvanced6 *ifa
             hr = S_OK;
         }
     }
+    else
+        FIXME("Unsupported setting %s.\n", debugstr_w(name));
     LeaveCriticalSection(&reader->callback_cs);
 
     LeaveCriticalSection(&reader->cs);
