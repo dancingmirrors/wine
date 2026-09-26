@@ -27,6 +27,14 @@ cpp_quote("#define XAPO_FLAG_BUFFERCOUNT_MUST_MATCH 0x8")
 cpp_quote("#define XAPO_FLAG_INPLACE_SUPPORTED 0x10")
 cpp_quote("#define XAPO_FLAG_INPLACE_REQUIRED 0x20")
 
+cpp_quote("#define XAPO_MIN_CHANNELS 1")
+cpp_quote("#define XAPO_MAX_CHANNELS 64")
+cpp_quote("#define XAPO_MIN_FRAMERATE 1000")
+cpp_quote("#define XAPO_MAX_FRAMERATE 200000")
+
+cpp_quote("#define FACILITY_XAPO 0x897")
+cpp_quote("#define XAPO_E_FORMAT_UNSUPPORTED ((HRESULT)0x88970001)")
+
 cpp_quote("#if 0")
 typedef struct WAVEFORMATEX
 {

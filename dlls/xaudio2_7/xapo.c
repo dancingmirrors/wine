@@ -101,8 +101,14 @@ static HRESULT WINAPI XAPOFX_GetRegistrationProperties(IXAPO *iface,
     if(FAILED(hr))
         return hr;
 
+    if(!(*props = CoTaskMemAlloc(sizeof(**props)))){
+        XAudio_Internal_Free(fprops);
+        return E_OUTOFMEMORY;
+    }
+
     /* TODO: check for version == 20 and use XAPO20_REGISTRATION_PROPERTIES */
-    *props = (XAPO_REGISTRATION_PROPERTIES*) fprops;
+    memcpy(*props, fprops, sizeof(**props));
+    XAudio_Internal_Free(fprops);
     return hr;
 }
 

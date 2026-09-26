@@ -123,6 +123,7 @@ static uint32_t FAPOCALL XAPO_GetRegistrationProperties(void *iface,
 {
     XA2XAPOImpl *This = impl_from_FAPO(iface);
     XAPO_REGISTRATION_PROPERTIES *xprops;
+    FAPORegistrationProperties *fprops;
     HRESULT hr;
 
     TRACE("%p\n", This);
@@ -131,8 +132,15 @@ static uint32_t FAPOCALL XAPO_GetRegistrationProperties(void *iface,
     if(FAILED(hr))
         return hr;
 
+    if(!(fprops = XAudio_Internal_Malloc(sizeof(*fprops)))){
+        CoTaskMemFree(xprops);
+        return E_OUTOFMEMORY;
+    }
+
     /* TODO: check for version == 20 and use XAPO20_REGISTRATION_PROPERTIES */
-    *ppRegistrationProperties = (FAPORegistrationProperties*) xprops;
+    memcpy(fprops, xprops, sizeof(*fprops));
+    CoTaskMemFree(xprops);
+    *ppRegistrationProperties = fprops;
     return 0;
 }
 
