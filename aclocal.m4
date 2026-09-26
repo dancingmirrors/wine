@@ -54,6 +54,53 @@ AC_DEFUN([WINE_PATH_MINGW_PKG_CONFIG],
            [ac_prefix_list="$host_cpu-w64-mingw32-pkg-config"])
 AC_CHECK_PROGS(MINGW_PKG_CONFIG,[$ac_prefix_list],false)])
 
+dnl **** Names of the PE cross-compilers to look for ****
+dnl
+m4_define([WINE_MINGW_PROGS_i386],dnl
+[m4_foreach([cc],[gcc,clang],m4_foreach([cpu],[i686,i586,i486,i386],[cpu-w64-mingw32-cc ]))])
+m4_define([WINE_MINGW_PROGS_x86_64],dnl
+[m4_foreach([cc],[gcc,clang],m4_foreach([cpu],[x86_64,amd64],[cpu-w64-mingw32-cc ]))])
+
+dnl **** Check for the PE cross-compiler of a given architecture ****
+dnl
+dnl Usage: WINE_CHECK_PE_CC(arch,programs)
+dnl
+dnl Sets <arch>_CC to the compiler that was found, or to "false".
+dnl
+AC_DEFUN([WINE_CHECK_PE_CC],
+[case "x$with_mingw" in
+  xclang|x*/clang) AS_VAR_SET([$1_CC],[$with_mingw]) ;;
+esac
+AS_VAR_IF([$1_CC],[],
+  [ac_prefix_list="$2"
+   AC_CHECK_PROGS([$1_CC],[$ac_prefix_list clang],[false])])])
+
+dnl **** Check whether a plain clang can build PE files for an architecture ****
+dnl
+dnl Usage: WINE_CHECK_PE_CLANG(arch,llvm-target,[action-if-not-working])
+dnl
+dnl This runs the same checks as the cross-compiler loop below, so that the
+dnl results are shared through the cache.
+dnl
+AC_DEFUN([WINE_CHECK_PE_CLANG],
+[wine_arch=$1
+AS_VAR_SET_IF([$1_CFLAGS],[],[AS_VAR_SET([$1_CFLAGS],[${CROSSCFLAGS:-"-g -O2"}])])
+AS_VAR_SET_IF([$1_LDFLAGS],[],[AS_VAR_SET([$1_LDFLAGS],[$CROSSLDFLAGS])])
+wine_check_saved_CC=$CC
+wine_check_saved_CFLAGS=$CFLAGS
+wine_check_saved_CPPFLAGS=$CPPFLAGS
+wine_check_saved_LDFLAGS=$LDFLAGS
+AS_VAR_COPY([CC],[$1_CC])
+AS_VAR_COPY([CFLAGS],[$1_CFLAGS])
+AS_VAR_COPY([LDFLAGS],[$1_LDFLAGS])
+CPPFLAGS=""
+WINE_TRY_PE_CFLAGS([-target $2 -fuse-ld=lld -Wl,-subsystem:console -Wl,-WX --no-default-config],[:],
+    [WINE_TRY_PE_CFLAGS([-target $2 -fuse-ld=lld -Wl,-subsystem:console -Wl,-WX],[:],[$3])])
+CC=$wine_check_saved_CC
+CFLAGS=$wine_check_saved_CFLAGS
+CPPFLAGS=$wine_check_saved_CPPFLAGS
+LDFLAGS=$wine_check_saved_LDFLAGS])
+
 dnl **** Extract the soname of a library ****
 dnl
 dnl Usage: WINE_CHECK_SONAME(library, function, [action-if-found, [action-if-not-found, [other_libraries, [pattern]]]])

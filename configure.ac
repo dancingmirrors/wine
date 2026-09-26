@@ -15,7 +15,7 @@ libwine_version="1.0"
 
 dnl **** Command-line arguments ****
 
-AC_ARG_ENABLE(archs, AS_HELP_STRING([--enable-archs={i386,x86_64,arm,aarch64}],[enable multiple architectures for PE compilation]))
+AC_ARG_ENABLE(archs, AS_HELP_STRING([--enable-archs={i386,x86_64,arm,aarch64}],[enable multiple architectures for PE compilation (default: i386,x86_64 when the cross-compilers are available)]))
 AC_ARG_ENABLE(win16, AS_HELP_STRING([--disable-win16],[do not include Win16 support]))
 AC_ARG_ENABLE(win64, AS_HELP_STRING([--enable-win64],[build a Win64 emulator on AMD64 (won't run Win32 binaries)]))
 AC_ARG_ENABLE(tests, AS_HELP_STRING([--enable-tests],[build the regression tests (disabled by default)]))
@@ -120,10 +120,52 @@ case $host in
     ;;
 esac
 
+dnl **** Determine the default architectures ****
+dnl
+dnl On x86-64 we default to building both 32-bit and 64-bit PE files, i.e. the
+dnl same thing as --enable-archs=i386,x86_64, when the cross-compilers for it
+dnl are installed. Since this is only a default and not an explicit request,
+dnl an architecture that doesn't work is skipped instead of being an error.
+
+default_archs=""
+AS_VAR_SET_IF([enable_archs],[],
+  [case $host in
+    x86_64*|amd64*)
+      if test "x$enable_win64" != xyes -a "x$with_mingw" != xno -a -z "$with_wine64" -a -z "$with_system_dllpath"
+      then
+          WINE_CHECK_PE_CC(i386,[WINE_MINGW_PROGS_i386])
+          WINE_CHECK_PE_CC(x86_64,[WINE_MINGW_PROGS_x86_64])
+          if test "$i386_CC" != false -a "$x86_64_CC" != false
+          then
+              default_archs="i386 x86_64"
+              dnl a plain clang is only of use here with a suitable PE sysroot,
+              dnl so check that it can really build PE files before relying on it
+              case $i386_CC in
+                clang|*/clang) WINE_CHECK_PE_CLANG(i386,[i686-windows],[default_archs=""]) ;;
+              esac
+              case $x86_64_CC in
+                clang|*/clang) WINE_CHECK_PE_CLANG(x86_64,[x86_64-windows],[default_archs=""]) ;;
+              esac
+          fi
+          if test -n "$default_archs"
+          then
+              dnl make sure that we can really build 64-bit before switching the default
+              saved_CC=$CC
+              CC="$CC -m64"
+              AC_CACHE_CHECK([whether $CC works], wine_cv_cc_m64,
+                  [AC_LINK_IFELSE([AC_LANG_PROGRAM()],[wine_cv_cc_m64=yes],[wine_cv_cc_m64=no])])
+              CC=$saved_CC
+              test $wine_cv_cc_m64 != no || default_archs=""
+          fi
+          AC_MSG_CHECKING([whether to enable 32-bit and 64-bit PE architectures by default])
+          AS_VAR_IF([default_archs],[],[AC_MSG_RESULT([no])],[AC_MSG_RESULT([yes])])
+      fi ;;
+  esac])
+
 AC_SUBST(TARGETFLAGS)
 case $host in
   x86_64*|amd64*)
-    if test "x$enable_win64" != "xyes" -a "$cross_compiling" != "yes" -a x"$enable_archs" = x
+    if test "x$enable_win64" != "xyes" -a "$cross_compiling" != "yes" -a x"$enable_archs$default_archs" = x
     then
       CC="$CC -m32"
       CXX="$CXX -m32"
@@ -798,7 +840,10 @@ AS_VAR_SET_IF([enable_archs],
            *) AC_MSG_ERROR([Unknown cross-compilation architecture '$arch']) ;;
          esac
      done],
-    [if test "x$with_mingw" != xno
+    [if test -n "$default_archs"
+     then
+         cross_archs=$default_archs
+     elif test "x$with_mingw" != xno
      then
          test $HOST_ARCH = unknown || cross_archs=$HOST_ARCH
      fi])
@@ -834,11 +879,11 @@ do
             AC_CHECK_PROGS(arm_CC,[armv7-w64-mingw32-clang armv7-w64-mingw32-gcc clang],[false])
             ;;
          i386)
-            ac_prefix_list="m4_foreach([cc],[gcc,clang],m4_foreach([cpu],[i686,i586,i486,i386],[cpu-w64-mingw32-cc ]))"
+            ac_prefix_list="WINE_MINGW_PROGS_i386"
             AC_CHECK_PROGS(i386_CC,[$ac_prefix_list clang],[false])
             ;;
          x86_64)
-            ac_prefix_list="m4_foreach([cc],[gcc,clang],m4_foreach([cpu],[x86_64,amd64],[cpu-w64-mingw32-cc ]))"
+            ac_prefix_list="WINE_MINGW_PROGS_x86_64"
             AC_CHECK_PROGS(x86_64_CC,[$ac_prefix_list clang],[false])
             ;;
         esac])

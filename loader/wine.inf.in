@@ -687,6 +687,8 @@ HKCU,Software\Microsoft\Windows\Shell\Associations\UrlAssociations\ftp\UserChoic
 HKCU,Software\Microsoft\Windows\Shell\Associations\UrlAssociations\http\UserChoice,"ProgId",,"http"
 HKCU,Software\Microsoft\Windows\Shell\Associations\UrlAssociations\https\UserChoice,"ProgId",,"https"
 
+HKCU,Software\Wine\DllOverrides,"winemenubuilder.exe",,""
+
 [KeyboardLayouts]
 HKLM,SYSTEM\CurrentControlSet\Control\Keyboard Layouts,,16
 HKLM,SYSTEM\CurrentControlSet\Control\Keyboard Layouts\00000401,,16
