@@ -1,0 +1,22 @@
+---
+BasedOnStyle: LLVM
+IndentWidth: 4
+UseTab: Never
+BreakBeforeBraces: Attach
+InsertBraces: true
+IndentCaseLabels: false
+AlignConsecutiveAssignments:
+  Enabled: false
+AlignConsecutiveDeclarations:
+  Enabled: false
+AlignConsecutiveMacros:
+  Enabled: false
+AlignTrailingComments:
+  Kind: Never
+AlignEscapedNewlines: DontAlign
+AlignArrayOfStructures: None
+AlignOperands: DontAlign
+ColumnLimit: 0
+SpaceBeforeAssignmentOperators: true
+SpaceInEmptyParentheses: false
+SortIncludes: true
