@@ -2058,6 +2058,7 @@ int a(int b, ...) { __builtin_ms_va_list list; __builtin_ms_va_start(list,b); }]
                    [ac_cv_mabi_ms=yes],[ac_cv_mabi_ms=no])
                 CFLAGS=$saved_CFLAGS])
            AS_VAR_IF([ac_cv_mabi_ms],[yes],
+                     [AS_VAR_IF([PE_ARCHS],[],[MSVCRTFLAGS="$MSVCRTFLAGS -mabi=ms"],[DLLEXT=""])],
                      [test -n "$PE_ARCHS" || AC_MSG_ERROR([The compiler doesn't support -mabi=ms. Use gcc instead of clang, or install mingw-w64.])
                       DLLEXT=""]) ;;
       esac ;;

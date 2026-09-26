@@ -378,7 +378,7 @@ static void set_user_shared_data_time(void)
 {
     timeout_t tick_count = monotonic_time / 10000;
     static timeout_t last_timezone_update, last_timezone_bias = 65535, adjusted_timezone_bias;
-    static int current_year = -1;
+    static int current_year = -1, last_isdst = -1;
     timeout_t timezone_bias;
     struct tm *tm, tm1, tm2;
     time_t now;
@@ -389,9 +389,10 @@ static void set_user_shared_data_time(void)
         tm = gmtime( &now );
         timezone_bias = mktime( tm ) - now;
         tm = localtime( &now );
-        if (current_year != tm->tm_year || last_timezone_bias != timezone_bias)
+        if (current_year != tm->tm_year || last_timezone_bias != timezone_bias || last_isdst != !!tm->tm_isdst)
         {
             current_year = tm->tm_year;
+            last_isdst = !!tm->tm_isdst;
             last_timezone_bias = adjusted_timezone_bias = timezone_bias;
             if (tm->tm_isdst)
             {

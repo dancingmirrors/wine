@@ -136,6 +136,60 @@ static WCHAR *get_file_name( WCHAR *cmdline, WCHAR *buffer, DWORD buflen )
 
 
 /***********************************************************************
+ *           append_extra_args
+ *
+ * Wine-specific hack: if the environment variable WINE_APPEND_ARGS_<NAME>
+ * is set, where <NAME> is the base name of the executable without its
+ * extension, in upper case and with every character other than a letter
+ * or a digit replaced by '_', its value is appended to the command line of
+ * the new process. For example WINE_APPEND_ARGS_ZFGAMEBROWSER="--disable-gpu"
+ * adds that switch to every ZFGameBrowser.exe started from Wine.
+ *
+ * This is meant for feeding switches to Chromium/CEF based helper processes
+ * without modifying the application, similar to Proton's per-game hacks.
+ * Returns a newly allocated command line, or NULL if nothing was appended.
+ */
+static WCHAR *append_extra_args( const WCHAR *app_name, const WCHAR *cmdline )
+{
+    static const WCHAR prefix[] = L"WINE_APPEND_ARGS_";
+    WCHAR var[ARRAY_SIZE(prefix) + 64], *ret, *p;
+    const WCHAR *base, *end;
+    DWORD len, cmdlen, size;
+
+    if ((base = wcsrchr( app_name, '\\' ))) base++;
+    else base = app_name;
+    if ((p = wcsrchr( base, '/' ))) base = p + 1;
+    if (!(end = wcsrchr( base, '.' )) || end == base) end = base + lstrlenW( base );
+    if (!(len = end - base) || len >= 64) return NULL;
+
+    lstrcpyW( var, prefix );
+    p = var + ARRAY_SIZE(prefix) - 1;
+    for (; base < end; base++)
+    {
+        WCHAR c = *base;
+        if (c >= 'a' && c <= 'z') c -= 'a' - 'A';
+        else if (!(c >= 'A' && c <= 'Z') && !(c >= '0' && c <= '9')) c = '_';
+        *p++ = c;
+    }
+    *p = 0;
+
+    if (!(size = GetEnvironmentVariableW( var, NULL, 0 ))) return NULL;
+    cmdlen = lstrlenW( cmdline );
+    if (!(ret = RtlAllocateHeap( GetProcessHeap(), 0, (cmdlen + 1 + size) * sizeof(WCHAR) ))) return NULL;
+    memcpy( ret, cmdline, cmdlen * sizeof(WCHAR) );
+    ret[cmdlen] = ' ';
+    if (!GetEnvironmentVariableW( var, ret + cmdlen + 1, size ))
+    {
+        RtlFreeHeap( GetProcessHeap(), 0, ret );
+        return NULL;
+    }
+    FIXME( "HACK: %s: appending %s to the command line of %s\n",
+           debugstr_w(var), debugstr_w(ret + cmdlen + 1), debugstr_w(app_name) );
+    return ret;
+}
+
+
+/***********************************************************************
  *           create_process_params
  */
 static RTL_USER_PROCESS_PARAMETERS *create_process_params( const WCHAR *filename, const WCHAR *cmdline,
@@ -514,7 +568,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH CreateProcessInternalW( HANDLE token, const WCHAR 
 {
     const struct proc_thread_attr *handle_list = NULL, *job_list = NULL;
     WCHAR name[MAX_PATH];
-    WCHAR *p, *tidy_cmdline = cmd_line;
+    WCHAR *p, *extra_args, *tidy_cmdline = cmd_line;
     RTL_USER_PROCESS_PARAMETERS *params = NULL;
     RTL_USER_PROCESS_INFORMATION rtl_info;
     HANDLE parent = 0, debug = 0;
@@ -541,6 +595,12 @@ BOOL WINAPI DECLSPEC_HOTPATCH CreateProcessInternalW( HANDLE token, const WCHAR 
     {
         if (!(tidy_cmdline = get_file_name( cmd_line, name, ARRAY_SIZE(name) ))) return FALSE;
         app_name = name;
+    }
+
+    if ((extra_args = append_extra_args( app_name, tidy_cmdline )))
+    {
+        if (tidy_cmdline != cmd_line) HeapFree( GetProcessHeap(), 0, tidy_cmdline );
+        tidy_cmdline = extra_args;
     }
 
     /* Warn if unsupported features are used */

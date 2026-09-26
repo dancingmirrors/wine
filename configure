@@ -21471,8 +21471,17 @@ fi
 printf '%s\n' "$ac_cv_mabi_ms" >&6; }
            if test "x$ac_cv_mabi_ms" = xyes
 then :
-  test -n "$PE_ARCHS" || as_fn_error $? "The compiler doesn't support -mabi=ms. Use gcc instead of clang, or install mingw-w64." "$LINENO" 5
-                      DLLEXT=""
+  if test "x$PE_ARCHS" = x
+then :
+  MSVCRTFLAGS="$MSVCRTFLAGS -mabi=ms"
+else case e in #(
+  e) DLLEXT="" ;;
+esac
+fi
+else case e in #(
+  e) test -n "$PE_ARCHS" || as_fn_error $? "The compiler doesn't support -mabi=ms. Use gcc instead of clang, or install mingw-w64." "$LINENO" 5
+                      DLLEXT="" ;;
+esac
 fi ;;
       esac ;;
     arm)
