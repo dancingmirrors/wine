@@ -19679,8 +19679,14 @@ then :
   printf '%s\n' "#define HAVE_KRB5_KRB5_H 1" >>confdefs.h
 
 fi
+ac_fn_c_check_header_compile "$LINENO" "krb5.h" "ac_cv_header_krb5_h" "$ac_includes_default"
+if test "x$ac_cv_header_krb5_h" = xyes
+then :
+  printf '%s\n' "#define HAVE_KRB5_H 1" >>confdefs.h
 
-         if test "$ac_cv_header_krb5_krb5_h" = "yes"
+fi
+
+         if test "$ac_cv_header_krb5_krb5_h" = "yes" -o "$ac_cv_header_krb5_h" = "yes"
          then
              { printf '%s\n' "$as_me:${as_lineno-$LINENO}: checking for -lkrb5" >&5
 printf %s "checking for -lkrb5... " >&6; }
@@ -19742,7 +19748,56 @@ printf '%s\n' "$ac_cv_lib_soname_krb5" >&6; }
 
 printf '%s\n' "#define SONAME_LIBKRB5 \"$ac_cv_lib_soname_krb5\"" >>confdefs.h
 
-        ;;
+                         { printf '%s\n' "$as_me:${as_lineno-$LINENO}: checking for krb5_storage_emem in -lkrb5" >&5
+printf %s "checking for krb5_storage_emem in -lkrb5... " >&6; }
+if test ${ac_cv_lib_krb5_krb5_storage_emem+y}
+then :
+  printf %s "(cached) " >&6
+else case e in #(
+  e) ac_check_lib_save_LIBS=$LIBS
+LIBS="-lkrb5 $KRB5_LIBS $LIBS"
+cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+
+/* Override any GCC internal prototype to avoid an error.
+   Use char because int might match the return type of a GCC
+   builtin and then its argument prototype would still apply.
+   The 'extern "C"' is for builds by C++ compilers;
+   although this is not generally supported in C code supporting it here
+   has little cost and some practical benefit (sr 110532).  */
+#ifdef __cplusplus
+extern "C"
+#endif
+char krb5_storage_emem (void);
+int
+main (void)
+{
+return krb5_storage_emem ();
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_link "$LINENO"
+then :
+  ac_cv_lib_krb5_krb5_storage_emem=yes
+else case e in #(
+  e) ac_cv_lib_krb5_krb5_storage_emem=no ;;
+esac
+fi
+rm -f core conftest.err conftest.$ac_objext conftest.beam \
+    conftest$ac_exeext conftest.$ac_ext
+LIBS=$ac_check_lib_save_LIBS ;;
+esac
+fi
+{ printf '%s\n' "$as_me:${as_lineno-$LINENO}: result: $ac_cv_lib_krb5_krb5_storage_emem" >&5
+printf '%s\n' "$ac_cv_lib_krb5_krb5_storage_emem" >&6; }
+if test "x$ac_cv_lib_krb5_krb5_storage_emem" = xyes
+then :
+
+printf '%s\n' "#define HAVE_HEIMDAL_KRB5 1" >>confdefs.h
+
+fi
+ ;;
 esac
 fi
          else
@@ -19805,7 +19860,75 @@ then :
 
 fi
 
-        if test "$ac_cv_header_gssapi_gssapi_h" = "yes" -a "$ac_cv_header_gssapi_gssapi_ext_h" = "yes"
+        if test "$ac_cv_header_gssapi_gssapi_h" != "yes"
+        then
+            GSSAPI_CFLAGS=""
+        elif test "$ac_cv_lib_krb5_krb5_storage_emem" = "yes"
+        then
+                        { printf '%s\n' "$as_me:${as_lineno-$LINENO}: checking for -lgssapi" >&5
+printf %s "checking for -lgssapi... " >&6; }
+if test ${ac_cv_lib_soname_gssapi+y}
+then :
+  printf %s "(cached) " >&6
+else case e in #(
+  e) ac_check_soname_save_LIBS=$LIBS
+LIBS="-lgssapi $GSSAPI_LIBS $LIBS"
+  cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+
+/* Override any GCC internal prototype to avoid an error.
+   Use char because int might match the return type of a GCC
+   builtin and then its argument prototype would still apply.
+   The 'extern "C"' is for builds by C++ compilers;
+   although this is not generally supported in C code supporting it here
+   has little cost and some practical benefit (sr 110532).  */
+#ifdef __cplusplus
+extern "C"
+#endif
+char gss_init_sec_context (void);
+int
+main (void)
+{
+return gss_init_sec_context ();
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_link "$LINENO"
+then :
+  case "$LIBEXT" in
+    dll) ac_cv_lib_soname_gssapi=`$ac_cv_path_LDD conftest.exe | grep "gssapi" | sed -e "s/dll.*/dll/"';2,$d'` ;;
+    dylib) ac_cv_lib_soname_gssapi=`$OTOOL -L conftest$ac_exeext | grep "libgssapi\\.[0-9A-Za-z.]*dylib" | sed -e "s/^.*\/\(libgssapi\.[0-9A-Za-z.]*dylib\).*$/\1/"';2,$d'` ;;
+    *) ac_cv_lib_soname_gssapi=`$READELF -d conftest$ac_exeext | grep "NEEDED.*libgssapi\\.$LIBEXT" | sed -e "s/^.*\\[\\(libgssapi\\.$LIBEXT[^	 ]*\\)\\].*$/\1/"';2,$d'`
+       if ${ac_cv_lib_soname_gssapi:+false} :
+then :
+  ac_cv_lib_soname_gssapi=`$LDD conftest$ac_exeext | grep "libgssapi\\.$LIBEXT" | sed -e "s/^.*\(libgssapi\.$LIBEXT[^	 ]*\).*$/\1/"';2,$d'`
+fi ;;
+  esac
+else case e in #(
+  e) ac_cv_lib_soname_gssapi= ;;
+esac
+fi
+rm -f core conftest.err conftest.$ac_objext conftest.beam \
+    conftest$ac_exeext conftest.$ac_ext
+  LIBS=$ac_check_soname_save_LIBS ;;
+esac
+fi
+if ${ac_cv_lib_soname_gssapi:+false} :
+then :
+  { printf '%s\n' "$as_me:${as_lineno-$LINENO}: result: not found" >&5
+printf '%s\n' "not found" >&6; }
+       GSSAPI_CFLAGS=""
+else case e in #(
+  e) { printf '%s\n' "$as_me:${as_lineno-$LINENO}: result: $ac_cv_lib_soname_gssapi" >&5
+printf '%s\n' "$ac_cv_lib_soname_gssapi" >&6; }
+
+printf '%s\n' "#define SONAME_LIBGSSAPI \"$ac_cv_lib_soname_gssapi\"" >>confdefs.h
+
+        ;;
+esac
+fi
+        elif test "$ac_cv_header_gssapi_gssapi_ext_h" = "yes"
         then
             { printf '%s\n' "$as_me:${as_lineno-$LINENO}: checking for -lgssapi_krb5" >&5
 printf %s "checking for -lgssapi_krb5... " >&6; }
@@ -19876,7 +19999,7 @@ fi
 CPPFLAGS=$ac_save_CPPFLAGS
 
 fi
-if test "x$ac_cv_lib_soname_gssapi_krb5" = "x"
+if test "x$ac_cv_lib_soname_gssapi_krb5" = "x" -a "x$ac_cv_lib_soname_gssapi" = "x"
 then :
   case "x$with_gssapi" in
   x)   as_fn_append wine_notices "|libgssapi_krb5 ${notice_platform}development files not found (or too old), no Kerberos SSP support." ;;

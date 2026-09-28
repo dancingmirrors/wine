@@ -27,13 +27,17 @@
 
 #include "config.h"
 
-#if defined(SONAME_LIBKRB5) && defined(SONAME_LIBGSSAPI_KRB5)
+#if defined(SONAME_LIBKRB5) && (defined(SONAME_LIBGSSAPI_KRB5) || defined(SONAME_LIBGSSAPI))
 
 #include <stdarg.h>
+#include <stdlib.h>
+#include <string.h>
 #include <sys/types.h>
 #include <dlfcn.h>
 
-#ifdef HAVE_KRB5_KRB5_H
+#ifdef HAVE_HEIMDAL_KRB5
+# include <krb5.h>
+#elif defined(HAVE_KRB5_KRB5_H)
 # include <krb5/krb5.h>
 #endif
 #ifdef HAVE_GSSAPI_GSSAPI_H
@@ -41,6 +45,13 @@
 #endif
 #ifdef HAVE_GSSAPI_GSSAPI_EXT_H
 # include <gssapi/gssapi_ext.h>
+#endif
+
+/* Heimdal calls its GSSAPI library libgssapi. */
+#ifdef SONAME_LIBGSSAPI_KRB5
+# define GSSAPI_SONAME SONAME_LIBGSSAPI_KRB5
+#else
+# define GSSAPI_SONAME SONAME_LIBGSSAPI
 #endif
 
 #include "ntstatus.h"
@@ -72,20 +83,27 @@ MAKE_FUNCPTR( krb5_cc_store_cred );
 MAKE_FUNCPTR( krb5_cccol_cursor_free );
 MAKE_FUNCPTR( krb5_cccol_cursor_new );
 MAKE_FUNCPTR( krb5_cccol_cursor_next );
-MAKE_FUNCPTR( krb5_decode_ticket );
 MAKE_FUNCPTR( krb5_free_context );
 MAKE_FUNCPTR( krb5_free_cred_contents );
 MAKE_FUNCPTR( krb5_free_principal );
-MAKE_FUNCPTR( krb5_free_ticket );
-MAKE_FUNCPTR( krb5_free_unparsed_name );
+/* Declared by hand because Heimdal marks it deprecated, which typeof() would report. */
+static void (*p_krb5_free_unparsed_name)( krb5_context context, char *str );
 MAKE_FUNCPTR( krb5_get_init_creds_opt_alloc );
 MAKE_FUNCPTR( krb5_get_init_creds_opt_free );
-MAKE_FUNCPTR( krb5_get_init_creds_opt_set_out_ccache );
 MAKE_FUNCPTR( krb5_get_init_creds_password );
 MAKE_FUNCPTR( krb5_init_context );
 MAKE_FUNCPTR( krb5_is_config_principal );
 MAKE_FUNCPTR( krb5_parse_name_flags );
 MAKE_FUNCPTR( krb5_unparse_name_flags );
+#ifdef HAVE_HEIMDAL_KRB5
+MAKE_FUNCPTR( decode_Ticket );
+MAKE_FUNCPTR( free_Ticket );
+MAKE_FUNCPTR( TicketFlags2int );
+#else
+MAKE_FUNCPTR( krb5_decode_ticket );
+MAKE_FUNCPTR( krb5_free_ticket );
+MAKE_FUNCPTR( krb5_get_init_creds_opt_set_out_ccache );
+#endif
 #undef MAKE_FUNCPTR
 
 static BOOL load_krb5(void)
@@ -113,20 +131,26 @@ static BOOL load_krb5(void)
     LOAD_FUNCPTR( krb5_cccol_cursor_free )
     LOAD_FUNCPTR( krb5_cccol_cursor_new )
     LOAD_FUNCPTR( krb5_cccol_cursor_next )
-    LOAD_FUNCPTR( krb5_decode_ticket )
     LOAD_FUNCPTR( krb5_free_context )
     LOAD_FUNCPTR( krb5_free_cred_contents )
     LOAD_FUNCPTR( krb5_free_principal )
-    LOAD_FUNCPTR( krb5_free_ticket )
     LOAD_FUNCPTR( krb5_free_unparsed_name )
     LOAD_FUNCPTR( krb5_get_init_creds_opt_alloc )
     LOAD_FUNCPTR( krb5_get_init_creds_opt_free )
-    LOAD_FUNCPTR( krb5_get_init_creds_opt_set_out_ccache )
     LOAD_FUNCPTR( krb5_get_init_creds_password )
     LOAD_FUNCPTR( krb5_init_context )
     LOAD_FUNCPTR( krb5_is_config_principal )
     LOAD_FUNCPTR( krb5_parse_name_flags )
     LOAD_FUNCPTR( krb5_unparse_name_flags )
+#ifdef HAVE_HEIMDAL_KRB5
+    LOAD_FUNCPTR( decode_Ticket )
+    LOAD_FUNCPTR( free_Ticket )
+    LOAD_FUNCPTR( TicketFlags2int )
+#else
+    LOAD_FUNCPTR( krb5_decode_ticket )
+    LOAD_FUNCPTR( krb5_free_ticket )
+    LOAD_FUNCPTR( krb5_get_init_creds_opt_set_out_ccache )
+#endif
 #undef LOAD_FUNCPTR
     return TRUE;
 
@@ -187,13 +211,46 @@ static void principal_to_name_and_realm(char *name_with_realm, char **name, char
     TRACE( "name: %s, realm: %s\n", debugstr_a(*name), debugstr_a(*realm) );
 }
 
+static krb5_error_code get_ticket_enctype( krb5_context ctx, const krb5_data *data, LONG *enctype )
+{
+#ifdef HAVE_HEIMDAL_KRB5
+    Ticket ticket;
+    size_t len;
+    int err;
+
+    if ((err = p_decode_Ticket( (const unsigned char *)data->data, data->length, &ticket, &len ))) return err;
+    *enctype = ticket.enc_part.etype;
+    p_free_Ticket( &ticket );
+#else
+    krb5_ticket *ticket;
+    krb5_error_code err;
+
+    if ((err = p_krb5_decode_ticket( data, &ticket ))) return err;
+    *enctype = ticket->enc_part.enctype;
+    p_krb5_free_ticket( ctx, ticket );
+#endif
+    return 0;
+}
+
+static ULONG get_ticket_flags( const krb5_creds *creds )
+{
+#ifdef HAVE_HEIMDAL_KRB5
+    /* Heimdal numbers the bits of the ASN.1 bit string from the least significant one. */
+    unsigned int i, flags = p_TicketFlags2int( creds->flags.b ), ret = 0;
+
+    for (i = 0; i < 32; i++) if (flags & (1u << i)) ret |= 1u << (31 - i);
+    return ret;
+#else
+    return creds->ticket_flags;
+#endif
+}
+
 static NTSTATUS copy_tickets_from_cache( krb5_context ctx, krb5_ccache cache, struct ticket_list *list )
 {
     NTSTATUS status;
     krb5_cc_cursor cursor;
     krb5_error_code err;
     krb5_creds creds;
-    krb5_ticket *ticket;
     char *server_name_with_realm, *server_name, *server_realm;
     char *client_name_with_realm, *client_name, *client_realm;
 
@@ -263,9 +320,9 @@ static NTSTATUS copy_tickets_from_cache( krb5_context ctx, krb5_ccache cache, st
         list->tickets[list->count].StartTime.QuadPart = creds.times.starttime;
         list->tickets[list->count].EndTime.QuadPart   = creds.times.endtime;
         list->tickets[list->count].RenewTime.QuadPart = creds.times.renew_till;
-        list->tickets[list->count].TicketFlags        = creds.ticket_flags;
+        list->tickets[list->count].TicketFlags        = get_ticket_flags( &creds );
 
-        err = p_krb5_decode_ticket( &creds.ticket, &ticket );
+        err = get_ticket_enctype( ctx, &creds.ticket, &list->tickets[list->count].EncryptionType );
         p_krb5_free_unparsed_name( ctx, server_name_with_realm );
         p_krb5_free_unparsed_name( ctx, client_name_with_realm );
         p_krb5_free_cred_contents( ctx, &creds );
@@ -274,9 +331,6 @@ static NTSTATUS copy_tickets_from_cache( krb5_context ctx, krb5_ccache cache, st
             status = krb5_error_to_status( err );
             break;
         }
-
-        list->tickets[list->count].EncryptionType = ticket->enc_part.enctype;
-        p_krb5_free_ticket( ctx, ticket );
         list->count++;
     }
 
@@ -346,6 +400,7 @@ static NTSTATUS kerberos_fill_ticket_list( struct ticket_list *list )
     {
         if ((err = p_krb5_cccol_cursor_next( ctx, cursor, &cache )))
         {
+            if (err == KRB5_CC_END) break; /* MIT returns a NULL cache instead. */
             status = krb5_error_to_status( err );
             goto done;
         }
@@ -418,9 +473,9 @@ MAKE_FUNCPTR( gss_wrap_iov );
 
 static BOOL load_gssapi_krb5(void)
 {
-    if (!(libgssapi_krb5_handle = dlopen( SONAME_LIBGSSAPI_KRB5, RTLD_NOW )))
+    if (!(libgssapi_krb5_handle = dlopen( GSSAPI_SONAME, RTLD_NOW )))
     {
-        WARN_(winediag)( "failed to load %s, Kerberos support will be disabled\n", SONAME_LIBGSSAPI_KRB5 );
+        WARN_(winediag)( "failed to load %s, Kerberos support will be disabled\n", GSSAPI_SONAME );
         return FALSE;
     }
 
@@ -610,7 +665,9 @@ static NTSTATUS init_creds( const char *user_at_domain, const char *password )
     if ((err = p_krb5_parse_name_flags( ctx, user_at_domain, 0, &principal ))) goto done;
     if ((err = p_krb5_cc_default( ctx, &cache ))) goto done;
     if ((err = p_krb5_get_init_creds_opt_alloc( ctx, &options ))) goto done;
+#ifndef HAVE_HEIMDAL_KRB5
     if ((err = p_krb5_get_init_creds_opt_set_out_ccache( ctx, options, cache ))) goto done;
+#endif
     if ((err = p_krb5_get_init_creds_password( ctx, &creds, principal, password, 0, NULL, 0, NULL, 0 ))) goto done;
     if ((err = p_krb5_cc_initialize( ctx, cache, principal ))) goto done;
     if ((err = p_krb5_cc_store_cred( ctx, cache, &creds ))) goto done;
@@ -803,19 +860,19 @@ static NTSTATUS make_signature( void *args )
     return status_gss_to_sspi( ret );
 }
 
-#define KERBEROS_MAX_SIGNATURE        37
-#define KERBEROS_SECURITY_TRAILER     49
+#define KERBEROS_MAX_SIGNATURE        64
+#define KERBEROS_SECURITY_TRAILER     64
 #define KERBEROS_MAX_SIGNATURE_DCE    28
 #define KERBEROS_SECURITY_TRAILER_DCE 76
 
 static NTSTATUS get_session_key( gss_ctx_id_t ctx, SecPkgContext_SessionKey *key )
 {
-    gss_OID_desc GSS_C_INQ_SSPI_SESSION_KEY =
+    gss_OID_desc inq_sspi_session_key = /* GSS_C_INQ_SSPI_SESSION_KEY, which is a macro in Heimdal. */
         { 11, (void *)"\x2a\x86\x48\x86\xf7\x12\x01\x02\x02\x05\x05" }; /* 1.2.840.113554.1.2.2.5.5 */
     OM_uint32 ret, minor_status;
     gss_buffer_set_t buffer_set = GSS_C_NO_BUFFER_SET;
 
-    ret = pgss_inquire_sec_context_by_oid( &minor_status, ctx, &GSS_C_INQ_SSPI_SESSION_KEY, &buffer_set );
+    ret = pgss_inquire_sec_context_by_oid( &minor_status, ctx, &inq_sspi_session_key, &buffer_set );
     if (GSS_ERROR( ret )) trace_gss_status( ret, minor_status );
     if (ret != GSS_S_COMPLETE) return STATUS_INTERNAL_ERROR;
 
@@ -1414,4 +1471,4 @@ C_ASSERT( ARRAYSIZE(__wine_unix_call_wow64_funcs) == unix_funcs_count );
 
 #endif /* _WIN64 */
 
-#endif /* defined(SONAME_LIBKRB5) && defined(SONAME_LIBGSSAPI_KRB5) */
+#endif /* defined(SONAME_LIBKRB5) && (defined(SONAME_LIBGSSAPI_KRB5) || defined(SONAME_LIBGSSAPI)) */

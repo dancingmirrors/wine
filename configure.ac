@@ -1872,10 +1872,14 @@ then
     WINE_PACKAGE_FLAGS(KRB5,[krb5],,
                        [`${KRB5_CONFIG:-krb5-config} --cflags 2>/dev/null`],
                        [`${KRB5_CONFIG:-krb5-config} --libs 2>/dev/null`],
-        [AC_CHECK_HEADERS([krb5/krb5.h])
-         if test "$ac_cv_header_krb5_krb5_h" = "yes"
+        [AC_CHECK_HEADERS([krb5/krb5.h krb5.h])
+         if test "$ac_cv_header_krb5_krb5_h" = "yes" -o "$ac_cv_header_krb5_h" = "yes"
          then
-             WINE_CHECK_SONAME(krb5,krb5_is_config_principal,,[KRB5_CFLAGS=""],[$KRB5_LIBS])
+             WINE_CHECK_SONAME(krb5,krb5_is_config_principal,
+                 [dnl Heimdal differs from MIT in places, detect it with one of its own functions
+                  AC_CHECK_LIB(krb5,krb5_storage_emem,
+                      [AC_DEFINE(HAVE_HEIMDAL_KRB5, 1, [Define if the Kerberos library is Heimdal])],,[$KRB5_LIBS])],
+                 [KRB5_CFLAGS=""],[$KRB5_LIBS])
          else
              KRB5_CFLAGS=""
          fi])
@@ -1891,14 +1895,21 @@ then
                        [`${KRB5_CONFIG:-krb5-config} --cflags gssapi 2>/dev/null`],
                        [`${KRB5_CONFIG:-krb5-config} --libs gssapi 2>/dev/null`],
         [AC_CHECK_HEADERS([gssapi/gssapi.h gssapi/gssapi_ext.h])
-        if test "$ac_cv_header_gssapi_gssapi_h" = "yes" -a "$ac_cv_header_gssapi_gssapi_ext_h" = "yes"
+        if test "$ac_cv_header_gssapi_gssapi_h" != "yes"
+        then
+            GSSAPI_CFLAGS=""
+        elif test "$ac_cv_lib_krb5_krb5_storage_emem" = "yes"
+        then
+            dnl Heimdal has the extensions in gssapi.h and calls the library libgssapi
+            WINE_CHECK_SONAME(gssapi, gss_init_sec_context,,[GSSAPI_CFLAGS=""],[$GSSAPI_LIBS])
+        elif test "$ac_cv_header_gssapi_gssapi_ext_h" = "yes"
         then
             WINE_CHECK_SONAME(gssapi_krb5, gss_init_sec_context,,[GSSAPI_CFLAGS=""],[$GSSAPI_LIBS])
         else
             GSSAPI_CFLAGS=""
         fi])
 fi
-WINE_NOTICE_WITH(gssapi,[test "x$ac_cv_lib_soname_gssapi_krb5" = "x"],
+WINE_NOTICE_WITH(gssapi,[test "x$ac_cv_lib_soname_gssapi_krb5" = "x" -a "x$ac_cv_lib_soname_gssapi" = "x"],
                  [libgssapi_krb5 ${notice_platform}development files not found (or too old), no Kerberos SSP support.])
 
 dnl **** Check for libprocstat ****
