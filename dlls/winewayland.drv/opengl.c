@@ -32,7 +32,7 @@
 #include "waylanddrv.h"
 #include "wine/debug.h"
 
-#if defined(SONAME_LIBEGL) && defined(HAVE_LIBWAYLAND_EGL)
+#if defined(SONAME_LIBEGL) && defined(HAVE_EGL_EGL_H) && defined(HAVE_LIBWAYLAND_EGL)
 
 WINE_DEFAULT_DEBUG_CHANNEL(waylanddrv);
 

@@ -34,7 +34,8 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(dib);
 
-static const struct osmesa_funcs *osmesa_funcs;
+static const struct dibdrv_gl_funcs *gl_funcs;
+static struct opengl_funcs opengl_funcs;
 
 static const DWORD bit_fields_888[3] = {0xff0000, 0x00ff00, 0x0000ff};
 static const DWORD bit_fields_555[3] = {0x7c00, 0x03e0, 0x001f};
@@ -467,8 +468,8 @@ static BOOL dibdrv_wglCopyContext( struct wgl_context *src, struct wgl_context *
  */
 static BOOL dibdrv_wglDeleteContext( struct wgl_context *context )
 {
-    if (!osmesa_funcs) return FALSE;
-    return osmesa_funcs->delete_context( context );
+    if (!gl_funcs) return FALSE;
+    return gl_funcs->delete_context( context );
 }
 
 /***********************************************************************
@@ -499,8 +500,8 @@ static struct wgl_context *dibdrv_wglCreateContext( HDC hdc )
     if (format <= 0 || format > ARRAY_SIZE( pixel_formats )) return NULL;
     describe_pixel_format( format, &descr );
 
-    if (!osmesa_funcs) return NULL;
-    return osmesa_funcs->create_context( hdc, &descr );
+    if (!gl_funcs) return NULL;
+    return gl_funcs->create_context( hdc, &descr );
 }
 
 /***********************************************************************
@@ -509,8 +510,8 @@ static struct wgl_context *dibdrv_wglCreateContext( HDC hdc )
 static PROC dibdrv_wglGetProcAddress( const char *proc )
 {
     if (!strncmp( proc, "wgl", 3 )) return NULL;
-    if (!osmesa_funcs) return NULL;
-    return osmesa_funcs->get_proc_address( proc );
+    if (!gl_funcs) return NULL;
+    return gl_funcs->get_proc_address( proc );
 }
 
 /***********************************************************************
@@ -518,36 +519,8 @@ static PROC dibdrv_wglGetProcAddress( const char *proc )
  */
 static BOOL dibdrv_wglMakeCurrent( HDC hdc, struct wgl_context *context )
 {
-    HBITMAP bitmap;
-    BITMAPOBJ *bmp;
-    dib_info dib;
-    BOOL ret = FALSE;
-
-    if (!osmesa_funcs) return FALSE;
-    if (!context) return osmesa_funcs->make_current( NULL, NULL, 0, 0, 0, 0 );
-
-    bitmap = NtGdiGetDCObject( hdc, NTGDI_OBJ_SURF );
-    bmp = GDI_GetObjPtr( bitmap, NTGDI_OBJ_BITMAP );
-    if (!bmp) return FALSE;
-
-    if (init_dib_info_from_bitmapobj( &dib, bmp ))
-    {
-        char *bits;
-        int width = dib.rect.right - dib.rect.left;
-        int height = dib.rect.bottom - dib.rect.top;
-
-        if (dib.stride < 0)
-            bits = (char *)dib.bits.ptr + (dib.rect.bottom - 1) * dib.stride;
-        else
-            bits = (char *)dib.bits.ptr + dib.rect.top * dib.stride;
-        bits += dib.rect.left * dib.bit_count / 8;
-
-        TRACE( "context %p bits %p size %ux%u\n", context, bits, width, height );
-
-        ret = osmesa_funcs->make_current( context, bits, width, height, dib.bit_count, dib.stride );
-    }
-    GDI_ReleaseObj( bitmap );
-    return ret;
+    if (!gl_funcs) return FALSE;
+    return gl_funcs->make_current( hdc, context );
 }
 
 /**********************************************************************
@@ -564,8 +537,8 @@ static BOOL dibdrv_wglSetPixelFormat( HDC hdc, int fmt, const PIXELFORMATDESCRIP
  */
 static BOOL dibdrv_wglShareLists( struct wgl_context *org, struct wgl_context *dest )
 {
-    FIXME( "not supported yet\n" );
-    return FALSE;
+    if (!gl_funcs) return FALSE;
+    return gl_funcs->share_lists( org, dest );
 }
 
 /***********************************************************************
@@ -573,7 +546,8 @@ static BOOL dibdrv_wglShareLists( struct wgl_context *org, struct wgl_context *d
  */
 static BOOL dibdrv_wglSwapBuffers( HDC hdc )
 {
-    return TRUE;
+    if (!gl_funcs || NtCurrentTeb()->glTable != &opengl_funcs) return TRUE;
+    return gl_funcs->swap_buffers( hdc );
 }
 
 /***********************************************************************
@@ -615,13 +589,13 @@ static struct opengl_funcs opengl_funcs =
  */
 struct opengl_funcs *dibdrv_get_wgl_driver(void)
 {
-    if (!osmesa_funcs && !(osmesa_funcs = init_opengl_lib()))
+    if (!gl_funcs && !(gl_funcs = init_opengl_lib()))
     {
         static int warned;
-        if (!warned++) ERR( "OSMesa not available, no OpenGL bitmap support\n" );
+        if (!warned++) ERR( "EGL not available, no OpenGL bitmap support\n" );
         return (void *)-1;
     }
-    osmesa_funcs->get_gl_funcs( &opengl_funcs );
+    gl_funcs->get_gl_funcs( &opengl_funcs );
     return &opengl_funcs;
 }
 
