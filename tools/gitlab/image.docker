@@ -19,7 +19,6 @@ RUN export DEBIAN_FRONTEND=noninteractive; \
                        libavutil-dev:amd64 libavutil-dev:i386 \
                        libavformat-dev:amd64 libavformat-dev:i386 \
                        libavcodec-dev:amd64 libavcodec-dev:i386 \
-                       libcapi20-dev:amd64 libcapi20-dev:i386 \
                        libcups2-dev:amd64 libcups2-dev:i386 \
                        libdbus-1-dev:amd64 libdbus-1-dev:i386 \
                        libfontconfig-dev:amd64 libfontconfig-dev:i386 \

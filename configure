@@ -644,8 +644,6 @@ FONTCONFIG_LIBS
 FONTCONFIG_CFLAGS
 CUPS_LIBS
 CUPS_CFLAGS
-CAPI20_LIBS
-CAPI20_CFLAGS
 SDL2_LIBS
 SDL2_CFLAGS
 UNWIND_LIBS
@@ -907,7 +905,6 @@ enable_sast
 enable_silent_rules
 enable_werror
 with_alsa
-with_capi
 with_coreaudio
 with_cups
 with_dbus
@@ -991,7 +988,6 @@ enable_bluetoothapis
 enable_browseui
 enable_bthprops_cpl
 enable_cabinet
-enable_capi2032
 enable_cards
 enable_cdosys
 enable_cfgmgr32
@@ -1853,8 +1849,6 @@ UNWIND_CFLAGS
 UNWIND_LIBS
 SDL2_CFLAGS
 SDL2_LIBS
-CAPI20_CFLAGS
-CAPI20_LIBS
 CUPS_CFLAGS
 CUPS_LIBS
 FONTCONFIG_CFLAGS
@@ -2513,7 +2507,6 @@ Optional Packages:
   --with-PACKAGE[=ARG]    use PACKAGE [ARG=yes]
   --without-PACKAGE       do not use PACKAGE (same as --with-PACKAGE=no)
   --without-alsa          do not use the Alsa sound support
-  --without-capi          do not use CAPI (ISDN support)
   --without-coreaudio     do not use the CoreAudio sound support
   --without-cups          do not use CUPS
   --without-dbus          do not use DBus (dynamic device support)
@@ -2716,9 +2709,6 @@ Some influential environment variables:
   UNWIND_LIBS Linker flags for libunwind, overriding pkg-config
   SDL2_CFLAGS C compiler flags for sdl2, overriding pkg-config
   SDL2_LIBS   Linker flags for sdl2, overriding pkg-config
-  CAPI20_CFLAGS
-              C compiler flags for capi20, overriding pkg-config
-  CAPI20_LIBS Linker flags for capi20, overriding pkg-config
   CUPS_CFLAGS C compiler flags for cups, overriding pkg-config
   CUPS_LIBS   Linker flags for cups, overriding pkg-config
   FONTCONFIG_CFLAGS
@@ -4243,13 +4233,6 @@ fi
 if test ${with_alsa+y}
 then :
   withval=$with_alsa;
-fi
-
-
-# Check whether --with-capi was given.
-if test ${with_capi+y}
-then :
-  withval=$with_capi;
 fi
 
 
@@ -19422,118 +19405,6 @@ esac
 
 fi
 
-if test "x$with_capi" != "xno"
-then
-    rm -f conftest.err
-if ${CAPI20_CFLAGS:+false} :
-then :
-  if test ${PKG_CONFIG+y}
-then :
-  CAPI20_CFLAGS=`$PKG_CONFIG --cflags capi20 2>conftest.err`
-fi
-fi
-
-if ${CAPI20_LIBS:+false} :
-then :
-  if test ${PKG_CONFIG+y}
-then :
-  CAPI20_LIBS=`$PKG_CONFIG --libs capi20 2>/dev/null`
-fi
-fi
-
-
-printf '%s\n' "$as_me:${as_lineno-$LINENO}: capi20 cflags: $CAPI20_CFLAGS" >&5
-printf '%s\n' "$as_me:${as_lineno-$LINENO}: capi20 libs: $CAPI20_LIBS" >&5
-if test -s conftest.err; then
-     printf %s "$as_me:${as_lineno-$LINENO}: capi20 errors: " >&5
-     cat conftest.err >&5
-fi
-rm -f conftest.err
-ac_save_CPPFLAGS=$CPPFLAGS
-CPPFLAGS="$CPPFLAGS $CAPI20_CFLAGS"
-    ac_fn_c_check_header_compile "$LINENO" "capi20.h" "ac_cv_header_capi20_h" "#define __user
-"
-if test "x$ac_cv_header_capi20_h" = xyes
-then :
-  printf '%s\n' "#define HAVE_CAPI20_H 1" >>confdefs.h
-
-fi
-ac_fn_c_check_header_compile "$LINENO" "linux/capi.h" "ac_cv_header_linux_capi_h" "#define __user
-"
-if test "x$ac_cv_header_linux_capi_h" = xyes
-then :
-  printf '%s\n' "#define HAVE_LINUX_CAPI_H 1" >>confdefs.h
-
-fi
-
-    if test "$ac_cv_header_capi20_h" = "yes" -a "$ac_cv_header_linux_capi_h" = "yes"
-    then
-        { printf '%s\n' "$as_me:${as_lineno-$LINENO}: checking for capi20_register in -lcapi20" >&5
-printf %s "checking for capi20_register in -lcapi20... " >&6; }
-if test ${ac_cv_lib_capi20_capi20_register+y}
-then :
-  printf %s "(cached) " >&6
-else case e in #(
-  e) ac_check_lib_save_LIBS=$LIBS
-LIBS="-lcapi20 $CAPI20_LIBS $LIBS"
-cat confdefs.h - <<_ACEOF >conftest.$ac_ext
-/* end confdefs.h.  */
-
-/* Override any GCC internal prototype to avoid an error.
-   Use char because int might match the return type of a GCC
-   builtin and then its argument prototype would still apply.
-   The 'extern "C"' is for builds by C++ compilers;
-   although this is not generally supported in C code supporting it here
-   has little cost and some practical benefit (sr 110532).  */
-#ifdef __cplusplus
-extern "C"
-#endif
-char capi20_register (void);
-int
-main (void)
-{
-return capi20_register ();
-  ;
-  return 0;
-}
-_ACEOF
-if ac_fn_c_try_link "$LINENO"
-then :
-  ac_cv_lib_capi20_capi20_register=yes
-else case e in #(
-  e) ac_cv_lib_capi20_capi20_register=no ;;
-esac
-fi
-rm -f core conftest.err conftest.$ac_objext conftest.beam \
-    conftest$ac_exeext conftest.$ac_ext
-LIBS=$ac_check_lib_save_LIBS ;;
-esac
-fi
-{ printf '%s\n' "$as_me:${as_lineno-$LINENO}: result: $ac_cv_lib_capi20_capi20_register" >&5
-printf '%s\n' "$ac_cv_lib_capi20_capi20_register" >&6; }
-if test "x$ac_cv_lib_capi20_capi20_register" = xyes
-then :
-  :
-else case e in #(
-  e) CAPI20_LIBS="" ;;
-esac
-fi
-
-    fi
-CPPFLAGS=$ac_save_CPPFLAGS
-
-fi
-if test "x$ac_cv_lib_capi20_capi20_register" != xyes
-then :
-  case "x$with_capi" in
-  x)   as_fn_append wine_notices "|libcapi20 ${notice_platform}development files not found, ISDN won't be supported." ;;
-  xno) ;;
-  *)   as_fn_error $? "libcapi20 ${notice_platform}development files not found, ISDN won't be supported.
-This is an error since --with-capi was requested." "$LINENO" 5 ;;
-esac
-enable_capi2032=${enable_capi2032:-no}
-fi
-
 if test "x$with_cups" != "xno"
 then
     rm -f conftest.err
@@ -22885,7 +22756,6 @@ wine_fn_config_makefile dlls/browseui/tests enable_tests
 wine_fn_config_makefile dlls/bthprops.cpl enable_bthprops_cpl
 wine_fn_config_makefile dlls/cabinet enable_cabinet
 wine_fn_config_makefile dlls/cabinet/tests enable_tests
-wine_fn_config_makefile dlls/capi2032 enable_capi2032
 wine_fn_config_makefile dlls/cards enable_cards
 wine_fn_config_makefile dlls/cdosys enable_cdosys
 wine_fn_config_makefile dlls/cfgmgr32 enable_cfgmgr32
@@ -25058,8 +24928,6 @@ UNWIND_CFLAGS = $UNWIND_CFLAGS
 UNWIND_LIBS = $UNWIND_LIBS
 SDL2_CFLAGS = $SDL2_CFLAGS
 SDL2_LIBS = $SDL2_LIBS
-CAPI20_CFLAGS = $CAPI20_CFLAGS
-CAPI20_LIBS = $CAPI20_LIBS
 CUPS_CFLAGS = $CUPS_CFLAGS
 CUPS_LIBS = $CUPS_LIBS
 FONTCONFIG_CFLAGS = $FONTCONFIG_CFLAGS

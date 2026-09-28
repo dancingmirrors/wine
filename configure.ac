@@ -26,7 +26,6 @@ AC_ARG_ENABLE(silent-rules, AS_HELP_STRING([--enable-silent-rules],[use silent b
 AC_ARG_ENABLE(werror, AS_HELP_STRING([--enable-werror],[treat compilation warnings as errors]))
 
 AC_ARG_WITH(alsa,      AS_HELP_STRING([--without-alsa],[do not use the Alsa sound support]))
-AC_ARG_WITH(capi,      AS_HELP_STRING([--without-capi],[do not use CAPI (ISDN support)]))
 AC_ARG_WITH(coreaudio, AS_HELP_STRING([--without-coreaudio],[do not use the CoreAudio sound support]))
 AC_ARG_WITH(cups,      AS_HELP_STRING([--without-cups],[do not use CUPS]))
 AC_ARG_WITH(dbus,      AS_HELP_STRING([--without-dbus],[do not use DBus (dynamic device support)]))
@@ -1838,21 +1837,6 @@ fi
 WINE_NOTICE_WITH(sdl,[test "x$ac_cv_lib_soname_SDL2" = "x"],
                  [libSDL2 ${notice_platform}development files not found, SDL2 won't be supported.])
 
-dnl **** Check for capi4linux ****
-if test "x$with_capi" != "xno"
-then
-    WINE_PACKAGE_FLAGS(CAPI20,[capi20],,,,
-     dnl Check for broken kernel header that doesn't define __user
-    [AC_CHECK_HEADERS([capi20.h linux/capi.h],,,[#define __user])
-    if test "$ac_cv_header_capi20_h" = "yes" -a "$ac_cv_header_linux_capi_h" = "yes"
-    then
-        AC_CHECK_LIB(capi20,capi20_register,[:],[CAPI20_LIBS=""],[$CAPI20_LIBS])
-    fi])
-fi
-WINE_NOTICE_WITH(capi,[test "x$ac_cv_lib_capi20_capi20_register" != xyes],
-                 [libcapi20 ${notice_platform}development files not found, ISDN won't be supported.],
-                 [enable_capi2032])
-
 dnl **** Check for cups ****
 if test "x$with_cups" != "xno"
 then
@@ -2522,7 +2506,6 @@ WINE_CONFIG_MAKEFILE(dlls/browseui/tests)
 WINE_CONFIG_MAKEFILE(dlls/bthprops.cpl)
 WINE_CONFIG_MAKEFILE(dlls/cabinet)
 WINE_CONFIG_MAKEFILE(dlls/cabinet/tests)
-WINE_CONFIG_MAKEFILE(dlls/capi2032)
 WINE_CONFIG_MAKEFILE(dlls/cards)
 WINE_CONFIG_MAKEFILE(dlls/cdosys)
 WINE_CONFIG_MAKEFILE(dlls/cfgmgr32)

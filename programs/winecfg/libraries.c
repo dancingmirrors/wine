@@ -48,7 +48,6 @@ static const WCHAR pe_dir[] = L"";
 static const WCHAR * const builtin_only[] =
 {
     L"advapi32",
-    L"capi2032",
     L"dbghelp",
     L"ddraw",
     L"gdi32",

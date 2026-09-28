@@ -434,22 +434,6 @@ void *
 LPCSTR
 char *
 
-%%capi2032.dll
-
-%long
-
-DWORD
-
-%ptr
-
-DWORD *
-PVOID
-PVOID *
-
-%str
-
-char *
-
 %%cards.dll
 
 %long
