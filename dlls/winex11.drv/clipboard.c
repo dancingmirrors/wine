@@ -200,6 +200,7 @@ static ULONG last_clipboard_update;
 static struct clipboard_format **current_x11_formats;
 static unsigned int nb_current_x11_formats;
 static BOOL use_xfixes;
+static BOOL import_pending;
 
 Display *clipboard_display = NULL;
 
@@ -2093,6 +2094,10 @@ static BOOL request_selection_contents( Display *display, BOOL changed )
             format = string;
     }
 
+    import_pending = (current_selection && !format);
+    if (import_pending) TRACE( "owner %lx refused to convert %s, will retry later\n",
+                               owner, debugstr_xatom( current_selection ));
+
     changed = (changed ||
                rendered_formats ||
                last_selection != current_selection ||
@@ -2137,10 +2142,19 @@ static BOOL request_selection_contents( Display *display, BOOL changed )
  */
 BOOL update_clipboard( HWND hwnd )
 {
-    if (use_xfixes) return TRUE;
+    static ULONG last_retry;
+    ULONG now = NtGetTickCount();
+
     if (hwnd != clipboard_hwnd) return TRUE;
     if (!is_clipboard_owner) return TRUE;
-    if (NtGetTickCount() - last_clipboard_update <= SELECTION_UPDATE_DELAY) return TRUE;
+    if (use_xfixes)
+    {
+        if (!import_pending) return TRUE;
+        if (now - last_retry <= SELECTION_UPDATE_DELAY) return TRUE;
+        last_retry = now;
+        return request_selection_contents( thread_display(), FALSE );
+    }
+    if (now - last_clipboard_update <= SELECTION_UPDATE_DELAY) return TRUE;
     return request_selection_contents( thread_display(), FALSE );
 }
 
