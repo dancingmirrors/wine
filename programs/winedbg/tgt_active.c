@@ -931,24 +931,11 @@ enum dbg_start dbg_active_auto(int argc, char* argv[])
         return ds;
     }
 
-    switch (display_crash_dialog())
-    {
-    case ID_DEBUG:
-        AllocConsole();
-        dbg_init_console();
-        dbg_start_interactive(NULL, INVALID_HANDLE_VALUE);
-        return start_ok;
-    case ID_DETAILS:
-        event = CreateEventW( NULL, TRUE, FALSE, NULL );
-        if (event) thread = display_crash_details( event );
-        if (thread) dbg_houtput = output = create_temp_file();
-        break;
-    }
+    if (DBG_IVAR(ShowCrashDialog)) dbg_houtput = output = create_temp_file();
 
     input = parser_generate_command_file("echo Modules:", "info share",
                                          "echo Threads:", "info threads",
                                          "info system",
-                                         "detach",
                                          NULL);
     if (input == INVALID_HANDLE_VALUE) return start_error_parse;
 
@@ -964,25 +951,37 @@ enum dbg_start dbg_active_auto(int argc, char* argv[])
 
     dbg_interactiveP = TRUE;
     parser_handle(NULL, input);
+    CloseHandle( input );
 
-    if (!first_exception)
+    if (!first_exception && de.dwDebugEventCode == EXIT_PROCESS_DEBUG_EVENT)
+        dbg_handle_debug_event(&de);
+
+    switch (display_crash_dialog())
     {
-        /* continue managing debug events, in case the exception event comes after current debug event */
-        if (de.dwDebugEventCode == EXIT_PROCESS_DEBUG_EVENT)
-            dbg_handle_debug_event(&de);
-        else
-            dbg_active_wait_for_first_exception();
+    case ID_DEBUG:
+        AllocConsole();
+        dbg_init_console();
+        dbg_start_interactive(NULL, INVALID_HANDLE_VALUE);
+        if (output != INVALID_HANDLE_VALUE) CloseHandle( output );
+        return start_ok;
+    case ID_DETAILS:
+        if (output != INVALID_HANDLE_VALUE) event = CreateEventW( NULL, TRUE, TRUE, NULL );
+        break;
     }
-    if (output != INVALID_HANDLE_VALUE)
+
+    /* let the debuggee go */
+    if (dbg_curr_process) dbg_curr_process->process_io->close_process(dbg_curr_process, FALSE);
+
+    if (event)
     {
-        SetEvent( event );
-        WaitForSingleObject( thread, INFINITE );
-        CloseHandle( output );
-        CloseHandle( thread );
+        if ((thread = display_crash_details( event )))
+        {
+            WaitForSingleObject( thread, INFINITE );
+            CloseHandle( thread );
+        }
         CloseHandle( event );
     }
-
-    CloseHandle( input );
+    if (output != INVALID_HANDLE_VALUE) CloseHandle( output );
     return start_ok;
 }
 
@@ -1061,7 +1060,7 @@ static BOOL tgt_process_active_close_process(struct dbg_process* pcs, BOOL kill)
     {
         DWORD exit_code = 0;
 
-        if (pcs == dbg_curr_process && dbg_curr_thread->in_exception)
+        if (pcs == dbg_curr_process && dbg_curr_thread && dbg_curr_thread->in_exception)
             exit_code = dbg_curr_thread->excpt_record.ExceptionCode;
 
         TerminateProcess(pcs->handle, exit_code);
@@ -1074,7 +1073,7 @@ static BOOL tgt_process_active_close_process(struct dbg_process* pcs, BOOL kill)
          * should this be handled inside the server ??? 
          */
         dbg_curr_process->be_cpu->single_step(&dbg_context, FALSE);
-        if (dbg_curr_thread->in_exception)
+        if (dbg_curr_thread && dbg_curr_thread->in_exception)
         {
             dbg_curr_process->be_cpu->set_context(dbg_curr_thread->handle, &dbg_context);
             ContinueDebugEvent(dbg_curr_pid, dbg_curr_tid, DBG_CONTINUE);

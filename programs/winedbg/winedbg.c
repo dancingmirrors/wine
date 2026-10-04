@@ -642,7 +642,8 @@ void dbg_start_interactive(const char* filename, HANDLE hFile)
     struct dbg_process* p;
     struct dbg_process* p2;
 
-    if (dbg_curr_process && dbg_curr_process->active_debuggee)
+    if (dbg_curr_process && dbg_curr_process->active_debuggee &&
+        !(dbg_curr_thread && dbg_curr_thread->in_exception))
         dbg_active_wait_for_first_exception();
 
     dbg_interactiveP = TRUE;
