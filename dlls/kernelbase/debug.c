@@ -514,6 +514,22 @@ static void format_exception_msg( const EXCEPTION_POINTERS *ptr, char *buffer, i
     snprintf( buffer + len,  size - len, " at address %p", ptr->ExceptionRecord->ExceptionAddress );
 }
 
+static BOOL is_interactive_winstation(void)
+{
+    HWINSTA (WINAPI *pGetProcessWindowStation)(void);
+    BOOL (WINAPI *pGetUserObjectInformationW)(HANDLE,INT,void*,DWORD,DWORD*);
+    HMODULE mod = GetModuleHandleW( L"user32.dll" );
+    USEROBJECTFLAGS flags;
+    HWINSTA winstation;
+
+    if (!mod) return TRUE;
+    pGetProcessWindowStation = (void *)GetProcAddress( mod, "GetProcessWindowStation" );
+    pGetUserObjectInformationW = (void *)GetProcAddress( mod, "GetUserObjectInformationW" );
+    if (!pGetProcessWindowStation || !pGetUserObjectInformationW) return TRUE;
+    if (!(winstation = pGetProcessWindowStation())) return TRUE;
+    if (!pGetUserObjectInformationW( winstation, UOI_FLAGS, &flags, sizeof(flags), NULL )) return TRUE;
+    return !!(flags.dwFlags & WSF_VISIBLE);
+}
 
 /******************************************************************
  *		start_debugger
@@ -642,7 +658,7 @@ static BOOL start_debugger( EXCEPTION_POINTERS *epointers, HANDLE event )
     TRACE( "Starting debugger %s\n", debugstr_w(cmdline) );
     memset( &startup, 0, sizeof(startup) );
     startup.cb = sizeof(startup);
-    startup.lpDesktop = (WCHAR*)L"WinSta0";
+    if (!is_interactive_winstation()) startup.lpDesktop = (WCHAR *)L"WinSta0\\Default";
     startup.dwFlags = STARTF_USESHOWWINDOW;
     startup.wShowWindow = SW_SHOWNORMAL;
     ret = CreateProcessW( NULL, cmdline, NULL, NULL, TRUE, CREATE_UNICODE_ENVIRONMENT, env, NULL, &startup, &info );
