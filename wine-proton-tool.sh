@@ -22,6 +22,7 @@ CONFIGURE_ARGS="${CONFIGURE_ARGS:-}"
 WINE_PREFIX_DIR="${WINE_PREFIX_DIR:-}"
 LOG_DIR="${WINE_COMPAT_LOG_DIR:-/tmp}"
 AS_ROOT="${AS_ROOT:-auto}"
+LINK_CLOUD_SAVES=0
 VENDOR=1
 RECONFIGURE=0
 
@@ -46,11 +47,18 @@ usage: ${0##*/} [all|build|install|register|doctor|uninstall] [options]
   --wineprefix DIR   one shared prefix for every game, e.g. ~/.wine
                      (default: unset, each game keeps its own compatdata pfx)
   --log-dir DIR      where per-run logs are written  (default: $LOG_DIR)
+  --link-cloud-saves Steam Cloud keeps a game's Windows saves in
+                     compatdata/<appid>/pfx/drive_c/users/steamuser, the
+                     Proton profile; make that a link to the profile the
+                     prefix really uses so those saves sync (default: off)
   --as-root CMD      how to install into a prefix you cannot write, e.g. doas,
                      sudo, 'doas -u root'; 'none' to fail instead
                      (default: auto, which prefers doas over sudo)
   --no-vendor        skip the lsteamclient vendoring step
-  --reconfigure      re-run configure even if the build looks usable
+  --reconfigure      configure from scratch with --archs, --configure-args and
+                     --dist even if the build looks usable; without it, a tree
+                     that needs reconfiguring keeps its own configure options.
+                     Run make clean after switching compilers this way
   --configure-args S extra arguments for configure
 
 actions:
@@ -68,6 +76,11 @@ a prefix you cannot write (--dist /usr/local) escalates, see --as-root.
 runtime overrides honored by the launcher:
   STEAM_COMPAT_TOOL_WINEPREFIX   prefix for this launch only
   WINE_COMPAT_LOG_DIR            log directory for this launch only
+  WINE_COMPAT_LINK_CLOUD_SAVES   1 or 0, overrides --link-cloud-saves
+  PROTON_EAC_RUNTIME             EasyAntiCheat runtime directory, "" to disable
+  PROTON_BATTLEYE_RUNTIME        BattlEye runtime directory, "" to disable
+                                 (both default to the Steam tools 1826330 and
+                                 1161040 when installed)
   WINEDEBUG                      passed through untouched when set
 USAGE
     exit 2
@@ -95,6 +108,7 @@ while [ $# -gt 0 ]; do
         --wineprefix)     WINE_PREFIX_DIR=$(abspath_str "$2"); shift 2 ;;
         --log-dir)        LOG_DIR=$(abspath_str "$2"); shift 2 ;;
         --as-root)        AS_ROOT=$2; shift 2 ;;
+        --link-cloud-saves) LINK_CLOUD_SAVES=1; shift ;;
         --configure-args) CONFIGURE_ARGS=$2; shift 2 ;;
         --no-vendor)      VENDOR=0; shift ;;
         --reconfigure)    RECONFIGURE=1; shift ;;
@@ -112,6 +126,27 @@ find_steam_root() {
         [ -d "$d/steamapps" ] && { ( cd -- "$d" && pwd -P ); return; }
     done
     die "cannot find a Steam installation; pass --steam-root"
+}
+
+steam_libraries() {
+    {
+        printf '%s\n' "$1"
+        sed -n 's/^[[:space:]]*"path"[[:space:]]*"\(.*\)"[[:space:]]*$/\1/p' \
+            "$1/steamapps/libraryfolders.vdf" 2>/dev/null
+    } | awk '!seen[$0]++'
+}
+
+# steam_tool_dir STEAMDIR APPID: install directory of a Steam app in any library
+steam_tool_dir() {
+    local lib dir
+    steam_libraries "$1" | while IFS= read -r lib; do
+        dir=$(sed -n 's/^[[:space:]]*"installdir"[[:space:]]*"\(.*\)"[[:space:]]*$/\1/p' \
+              "$lib/steamapps/appmanifest_$2.acf" 2>/dev/null | head -n 1)
+        if [ -n "$dir" ] && [ -d "$lib/steamapps/common/$dir" ]; then
+            printf '%s\n' "$lib/steamapps/common/$dir"
+            break
+        fi
+    done
 }
 
 if [ "$ACTION" = "build" ]; then
@@ -174,7 +209,7 @@ stale_reason() {
         printf '%s\n' "no Makefile in $BUILD"
         return 0
     fi
-    for d in dlls/lsteamclient programs/steamstub dlls/steamstub; do
+    for d in dlls/lsteamclient programs/steamstub dlls/steamstub programs/belauncher; do
         [ -f "$SRC/$d/Makefile.in" ] || continue
         grep -q "$d/" "$BUILD/Makefile" && continue
         printf '%s\n' "$d is in the tree but absent from the Makefile"
@@ -237,7 +272,12 @@ do_build() {
         reason=$(stale_reason) || reason=""
     fi
 
-    if [ -n "$reason" ]; then
+    if [ -n "$reason" ] && [ "$RECONFIGURE" = 0 ] && [ -x "$BUILD/config.status" ]; then
+        log "re-running configure with the tree's own options: $reason"
+        log "  $( (cd "$BUILD" && ./config.status --config) 2>/dev/null )"
+        ( cd "$BUILD" && ./config.status --recheck && ./config.status ) \
+            || die "configure failed in $BUILD; see $BUILD/config.log"
+    elif [ -n "$reason" ]; then
         [ -x "$SRC/configure" ] \
             || die "no configure script in $SRC; generate it yourself (this script does not run autoreconf)"
         keep_prefix=$(configured_prefix "$BUILD")
@@ -302,6 +342,8 @@ do_install() {
                 || warn "lsteamclient.dll missing for $a"
             [ -f "$DIST/lib/wine/$a-windows/steamstub.exe" ] \
                 || warn "steamstub.exe missing for $a"
+            [ -f "$DIST/lib/wine/$a-windows/belauncher.exe" ] \
+                || warn "belauncher.exe missing for $a, BattlEye games will not start"
         ;; esac
     done
 }
@@ -349,6 +391,8 @@ VDF
         printf '%s\n' '#!/usr/bin/env bash'
         printf 'DEFAULT_WINEPREFIX=%s\n' "$(printf '%q' "$WINE_PREFIX_DIR")"
         printf 'DEFAULT_LOG_DIR=%s\n'    "$(printf '%q' "$LOG_DIR")"
+        printf 'DEFAULT_LINK_CLOUD_SAVES=%s\n' "$LINK_CLOUD_SAVES"
+        declare -f steam_libraries steam_tool_dir
     } > "$TOOLDIR/proton"
     cat >> "$TOOLDIR/proton" <<'LAUNCHER'
 set -eu
@@ -394,6 +438,69 @@ log() { printf '%s\n' "[${0##*/}] $*" >&2; }
 
 log "verb=$verb appid=$SteamAppId prefix=$WINEPREFIX wine=$("$WINE" --version 2>/dev/null)"
 log "WINEDEBUG=${WINEDEBUG-<unset>} args: $*"
+
+: "${PROTON_EAC_RUNTIME=$(steam_tool_dir "$STEAMDIR" 1826330)}"
+: "${PROTON_BATTLEYE_RUNTIME=$(steam_tool_dir "$STEAMDIR" 1161040)}"
+if [ -n "$PROTON_EAC_RUNTIME" ]; then
+    export PROTON_EAC_RUNTIME
+else
+    unset PROTON_EAC_RUNTIME
+fi
+if [ -n "$PROTON_BATTLEYE_RUNTIME" ]; then
+    export PROTON_BATTLEYE_RUNTIME
+    # the runtime's BEClient bridge goes before the game's; entries already
+    # in WINEDLLOVERRIDES come later and still win
+    export WINEDLLOVERRIDES="beclient,beclient_x64=b,n${WINEDLLOVERRIDES:+;$WINEDLLOVERRIDES}"
+else
+    unset PROTON_BATTLEYE_RUNTIME
+fi
+log "EasyAntiCheat runtime: ${PROTON_EAC_RUNTIME:-none (steam://install/1826330)}"
+log "BattlEye runtime: ${PROTON_BATTLEYE_RUNTIME:-none (steam://install/1161040)}"
+
+LINK_CLOUD_SAVES="${WINE_COMPAT_LINK_CLOUD_SAVES:-${DEFAULT_LINK_CLOUD_SAVES:-0}}"
+
+# merge_missing SRC DST: copy the files under SRC that DST lacks, following
+# links in DST (Wine links Documents and the like to the XDG directories)
+merge_missing() {
+    ( cd -- "$1" && find . -type f -print0 ) | while IFS= read -r -d '' rel; do
+        rel=${rel#./}
+        [ -e "$2/$rel" ] && continue
+        mkdir -p -- "$(dirname -- "$2/$rel")" && cp -p -- "$1/$rel" "$2/$rel" || return 1
+    done
+}
+
+WINE_USER=${USER:-$(id -un 2>/dev/null || echo wine)}
+PROFILE="$WINEPREFIX/drive_c/users/${WINE_USER##*/}"   # Wine's rule
+CLOUD_PROFILE="${STEAM_COMPAT_DATA_PATH:-}/pfx/drive_c/users/steamuser"
+
+link_cloud_saves() {
+    local target backup
+    [ -n "${STEAM_COMPAT_DATA_PATH:-}" ] && [ "$PROFILE" != "$CLOUD_PROFILE" ] || return 0
+    if [ ! -d "$PROFILE" ]; then
+        log "cloud saves: no profile at $PROFILE, not linking"
+        return 0
+    fi
+    if [ "$SHARED_PREFIX" = 1 ]; then target=$PROFILE; else target=${PROFILE##*/}; fi
+
+    if [ -L "$CLOUD_PROFILE" ]; then
+        [ "$(readlink -- "$CLOUD_PROFILE")" != "$target" ] || return 0
+        rm -f -- "$CLOUD_PROFILE" || return 1
+    elif [ -e "$CLOUD_PROFILE" ]; then
+        # Steam has already synced cloud files into a real directory here:
+        # add the ones the profile lacks, never overwrite, keep the original
+        merge_missing "$CLOUD_PROFILE" "$PROFILE" || return 1
+        backup="$CLOUD_PROFILE.before-link-$(date +%Y%m%d-%H%M%S)"
+        mv -- "$CLOUD_PROFILE" "$backup" || return 1
+        log "cloud saves: copied what $PROFILE lacked from $CLOUD_PROFILE, kept it as $backup"
+    fi
+    mkdir -p -- "${CLOUD_PROFILE%/*}" && ln -s -- "$target" "$CLOUD_PROFILE" || return 1
+    log "cloud saves: linked $CLOUD_PROFILE -> $target"
+}
+
+if [ "$LINK_CLOUD_SAVES" != 1 ] && [ -n "${STEAM_COMPAT_DATA_PATH:-}" ] && [ "$PROFILE" != "$CLOUD_PROFILE" ]; then
+    log "NOTE: Steam Cloud syncs this game's Windows saves in $CLOUD_PROFILE, but its profile is" \
+        "$PROFILE; see --link-cloud-saves"
+fi
 
 ensure_sdk_links() {
     mkdir -p "$HOME/.steam"
@@ -476,6 +583,9 @@ case "$verb" in
             "$WINESERVER" -w
         fi
         [ $# -gt 0 ] || { log "no command given"; exit 2; }
+        if [ "$LINK_CLOUD_SAVES" = 1 ] && ! link_cloud_saves; then
+            log "cloud saves: could not link $CLOUD_PROFILE to $PROFILE, Steam Cloud will miss this game's saves"
+        fi
         exe=$1; shift
         exe_w=$("$WINE" winepath -w "$exe" 2>/dev/null) || exe_w=$exe
         exec "$WINE" steamstub.exe "$exe_w" "$@"
@@ -517,10 +627,36 @@ do_doctor() {
     check "lsteamclient.dll (x86_64) built"  '[ -f "$TOOLDIR/dist/lib/wine/x86_64-windows/lsteamclient.dll" ]'
     check "lsteamclient.dll (i386) built"    '[ -f "$TOOLDIR/dist/lib/wine/i386-windows/lsteamclient.dll" ]'
     check "steamstub.exe built"              '[ -f "$TOOLDIR/dist/lib/wine/x86_64-windows/steamstub.exe" ]'
+    check "belauncher.exe built"             '[ -f "$TOOLDIR/dist/lib/wine/x86_64-windows/belauncher.exe" ]'
     check "~/.steam/sdk64/steamclient.so"    '[ -e "$HOME/.steam/sdk64/steamclient.so" ]'
     check "~/.steam/sdk32/steamclient.so"    '[ -e "$HOME/.steam/sdk32/steamclient.so" ]'
     check "legacycompat shims in Steam"      '[ -f "$STEAM_ROOT/legacycompat/steamclient64.dll" ]'
     check "/dev/ntsync present"              '[ -e /dev/ntsync ]'
+    for rt in '1826330 EasyAntiCheat' '1161040 BattlEye'; do
+        d=$(steam_tool_dir "$STEAM_ROOT" "${rt%% *}")
+        printf '  --   %s runtime: %s\n' "${rt#* }" \
+            "${d:-not installed, only games using it need it (steam://install/${rt%% *})}"
+    done
+    cl=$(sed -n "s/^DEFAULT_LINK_CLOUD_SAVES=//p" "$TOOLDIR/proton" 2>/dev/null || true)
+    if [ "${cl:-0}" = 1 ]; then
+        printf '  --   cloud saves: compatdata/<appid>/pfx/drive_c/users/steamuser is linked to the real profile\n'
+    else
+        printf '  --   cloud saves: not linked, Steam Cloud misses saves under the Windows profile\n'
+        printf '       (register with --link-cloud-saves)\n'
+    fi
+    # profiles Steam Cloud synced into that no prefix of this tool reads
+    steam_libraries "$STEAM_ROOT" | while IFS= read -r lib; do
+        for d in "$lib"/steamapps/compatdata/*/pfx/drive_c/users/steamuser; do
+            [ -d "$d" ] && [ ! -L "$d" ] || continue
+            pfx=${d%/drive_c/users/steamuser}
+            # a real Proton prefix uses this profile itself
+            [ ! -f "$pfx/system.reg" ] || [ -f "$pfx/.compat_tool_version" ] || continue
+            n=$(find "$d" -type f 2>/dev/null | wc -l)
+            [ "$n" -gt 0 ] || continue
+            app=${pfx%/pfx}
+            printf '  --   unused Steam Cloud files, app %s: %s files in %s\n' "${app##*/}" "$n" "$d"
+        done
+    done
     [ "$rc" = 0 ] && printf '\nall good\n' || printf '\nsee failures above\n'
     return "$rc"
 }

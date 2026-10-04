@@ -1644,6 +1644,7 @@ enable_po
 enable_arp
 enable_aspnet_regiis
 enable_attrib
+enable_belauncher
 enable_cabarc
 enable_cacls
 enable_certutil
@@ -23880,6 +23881,7 @@ wine_fn_config_makefile po enable_po
 wine_fn_config_makefile programs/arp enable_arp
 wine_fn_config_makefile programs/aspnet_regiis enable_aspnet_regiis
 wine_fn_config_makefile programs/attrib enable_attrib
+wine_fn_config_makefile programs/belauncher enable_belauncher
 wine_fn_config_makefile programs/cabarc enable_cabarc
 wine_fn_config_makefile programs/cacls enable_cacls
 wine_fn_config_makefile programs/certutil enable_certutil

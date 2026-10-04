@@ -2,13 +2,76 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "ntstatus.h"
+#define WIN32_NO_STATUS
 #include "windef.h"
 #include "winbase.h"
 #include "winuser.h"
 #include "winreg.h"
+#include "winternl.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(steamstub);
+
+#ifndef DIRECTORY_QUERY
+#define DIRECTORY_QUERY 0x0001
+#endif
+
+static HANDLE find_ack_event(void)
+{
+    static const WCHAR prefixW[] = L"STEAM_START_ACK_EVENT";
+    UNICODE_STRING str = RTL_CONSTANT_STRING( L"\\BaseNamedObjects\\Session\\1" );
+    DIRECTORY_BASIC_INFORMATION *di;
+    OBJECT_ATTRIBUTES attr;
+    HANDLE dir, ret = NULL;
+    ULONG context, size;
+    char buffer[1024];
+    NTSTATUS status;
+
+    di = (DIRECTORY_BASIC_INFORMATION *)buffer;
+    InitializeObjectAttributes( &attr, &str, 0, 0, NULL );
+    if ((status = NtOpenDirectoryObject( &dir, DIRECTORY_QUERY, &attr )))
+    {
+        WARN( "failed to open the session directory, status %#lx\n", status );
+        return NULL;
+    }
+
+    status = NtQueryDirectoryObject( dir, di, sizeof(buffer), TRUE, TRUE, &context, &size );
+    while (!status)
+    {
+        if (!wcsncmp( di->ObjectName.Buffer, prefixW, ARRAY_SIZE(prefixW) - 1 ))
+        {
+            TRACE( "found %s\n", debugstr_w(di->ObjectName.Buffer) );
+            if (!(ret = OpenEventW( SYNCHRONIZE | EVENT_MODIFY_STATE, FALSE, di->ObjectName.Buffer )))
+                WARN( "could not open %s, error %lu\n", debugstr_w(di->ObjectName.Buffer), GetLastError() );
+            break;
+        }
+        status = NtQueryDirectoryObject( dir, di, sizeof(buffer), TRUE, FALSE, &context, &size );
+    }
+    NtClose( dir );
+    return ret;
+}
+
+struct drm_ipc
+{
+    HANDLE consume;
+    HANDLE produce;
+};
+
+static DWORD WINAPI steam_drm_thread( void *arg )
+{
+    struct drm_ipc *ipc = arg;
+    HANDLE start_ack = NULL;
+
+    while (WaitForSingleObject( ipc->consume, INFINITE ) == WAIT_OBJECT_0)
+    {
+        TRACE( "got a Steam DRM request\n" );
+        if (!start_ack) start_ack = find_ack_event();
+        if (start_ack) SetEvent( start_ack );
+        ReleaseSemaphore( ipc->produce, 1, NULL );
+    }
+    return 0;
+}
 
 static DWORD WINAPI steam_windows_thread( void *arg )
 {
@@ -52,6 +115,7 @@ int __cdecl wmain( int argc, WCHAR *argv[] )
     PROCESS_INFORMATION pi = { 0 };
     WCHAR path[MAX_PATH], *p, *cmdline, *child;
     DWORD pid = GetCurrentProcessId(), code = 0;
+    static struct drm_ipc ipc;
     HANDLE thread;
 
     if (argc < 2)
@@ -77,6 +141,14 @@ int __cdecl wmain( int argc, WCHAR *argv[] )
     GetModuleFileNameW( NULL, path, MAX_PATH );
     for (p = path; *p; p++) if (*p == '\\') *p = '/';
     SetEnvironmentVariableW( L"ValvePlatformMutex", path );
+
+    /* the misspelled name is the one Steam uses */
+    ipc.consume = CreateSemaphoreW( NULL, 0, 512, L"STEAM_DIPC_CONSUME" );
+    ipc.produce = CreateSemaphoreW( NULL, 1, 512, L"SREAM_DIPC_PRODUCE" );
+    if (ipc.consume && ipc.produce && (thread = CreateThread( NULL, 0, steam_drm_thread, &ipc, 0, NULL )))
+        CloseHandle( thread );
+    else
+        WARN( "could not set up Steam DRM IPC, error %lu\n", GetLastError() );
 
     if (!(cmdline = _wcsdup( GetCommandLineW() ))) return 1;
     child = skip_argv0( cmdline );

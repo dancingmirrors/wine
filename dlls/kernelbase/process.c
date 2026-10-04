@@ -26,6 +26,7 @@
 #include "windef.h"
 #include "winbase.h"
 #include "winnls.h"
+#include "winver.h"
 #include "wincontypes.h"
 #include "winternl.h"
 
@@ -285,6 +286,94 @@ static RTL_USER_PROCESS_PARAMETERS *create_process_params( const WCHAR *filename
     params->wShowWindow     = startup->wShowWindow;
 
     if (envW != env) RtlFreeHeap( GetProcessHeap(), 0, envW );
+    return params;
+}
+
+static char *get_product_name( const WCHAR *app_name )
+{
+    WCHAR path[MAX_PATH];
+    char buf[64], *product_name, *ret = NULL;
+    DWORD *translation;
+    void *block;
+    UINT size;
+
+    if (!GetLongPathNameW( app_name, path, MAX_PATH )) lstrcpynW( path, app_name, MAX_PATH );
+    if (!GetFullPathNameW( path, MAX_PATH, path, NULL )) lstrcpynW( path, app_name, MAX_PATH );
+
+    if (!(size = GetFileVersionInfoSizeExW( 0, path, NULL ))) return NULL;
+    if (!(block = HeapAlloc( GetProcessHeap(), 0, size ))) return NULL;
+
+    if (GetFileVersionInfoExW( 0, path, 0, size, block ) &&
+        VerQueryValueA( block, "\\VarFileInfo\\Translation", (void **)&translation, &size ) &&
+        size >= sizeof(*translation))
+    {
+        sprintf( buf, "\\StringFileInfo\\%08lx\\ProductName",
+                 MAKELONG( HIWORD(*translation), LOWORD(*translation) ));
+        if (VerQueryValueA( block, buf, (void **)&product_name, &size ) &&
+            (ret = HeapAlloc( GetProcessHeap(), 0, strlen( product_name ) + 1 )))
+            strcpy( ret, product_name );
+    }
+    HeapFree( GetProcessHeap(), 0, block );
+    return ret;
+}
+
+static BOOL battleye_launcher_redirect( const WCHAR *app_name, WCHAR *new_name, DWORD new_name_len,
+                                        WCHAR **orig_app_name, const char *product_name )
+{
+    static const WCHAR belauncherW[] = L"C:\\windows\\system32\\belauncher.exe";
+
+    if (!product_name || strcmp( product_name, "BattlEye Launcher" )) return FALSE;
+    if (!GetEnvironmentVariableW( L"PROTON_BATTLEYE_RUNTIME", NULL, 0 )) return FALSE;
+    if (GetEnvironmentVariableW( L"PROTON_ORIG_LAUNCHER_NAME", NULL, 0 )) return FALSE;  /* started by belauncher */
+    if (new_name_len < ARRAY_SIZE(belauncherW)) return FALSE;
+
+    if (!(*orig_app_name = HeapAlloc( GetProcessHeap(), 0, (lstrlenW( app_name ) + 1) * sizeof(WCHAR) )))
+        return FALSE;
+    lstrcpyW( *orig_app_name, app_name );
+    lstrcpyW( new_name, belauncherW );
+    TRACE( "starting belauncher.exe in place of the BattlEye launcher %s\n", debugstr_w(*orig_app_name) );
+    return TRUE;
+}
+
+static RTL_USER_PROCESS_PARAMETERS *set_anticheat_env( RTL_USER_PROCESS_PARAMETERS *params,
+                                                        const WCHAR *app_name, const WCHAR *cmdline,
+                                                        const WCHAR *cur_dir, DWORD flags,
+                                                        const STARTUPINFOW *startup,
+                                                        const char *product_name,
+                                                        const WCHAR *orig_app_name )
+{
+    BOOL eac_launcher = product_name && !strcmp( product_name, "EasyAntiCheat Launcher" );
+    RTL_USER_PROCESS_PARAMETERS *new_params;
+    UNICODE_STRING name, value;
+    WCHAR *env, buf[2];
+
+    RtlInitUnicodeString( &name, L"PROTON_EAC_LAUNCHER_PROCESS" );
+    value.Buffer = buf;
+    value.Length = 0;
+    value.MaximumLength = sizeof(buf);
+    if (!eac_launcher && !orig_app_name &&
+        RtlQueryEnvironmentVariable_U( params->Environment, &name, &value ) == STATUS_VARIABLE_NOT_FOUND)
+        return params;
+
+    if (!(env = RtlAllocateHeap( GetProcessHeap(), 0, params->EnvironmentSize ))) return params;
+    memcpy( env, params->Environment, params->EnvironmentSize );
+
+    RtlInitUnicodeString( &value, L"1" );
+    RtlSetEnvironmentVariable( &env, &name, eac_launcher ? &value : NULL );
+    if (orig_app_name)
+    {
+        RtlInitUnicodeString( &name, L"PROTON_ORIG_LAUNCHER_NAME" );
+        RtlInitUnicodeString( &value, orig_app_name );
+        RtlSetEnvironmentVariable( &env, &name, &value );
+    }
+
+    if ((new_params = create_process_params( app_name, cmdline, cur_dir, env,
+                                             flags | CREATE_UNICODE_ENVIRONMENT, startup )))
+    {
+        RtlDestroyProcessParameters( params );
+        params = new_params;
+    }
+    RtlFreeHeap( GetProcessHeap(), 0, env );
     return params;
 }
 
@@ -568,10 +657,11 @@ BOOL WINAPI DECLSPEC_HOTPATCH CreateProcessInternalW( HANDLE token, const WCHAR 
 {
     const struct proc_thread_attr *handle_list = NULL, *job_list = NULL;
     WCHAR name[MAX_PATH];
-    WCHAR *p, *extra_args, *tidy_cmdline = cmd_line;
+    WCHAR *p, *extra_args, *tidy_cmdline = cmd_line, *orig_app_name = NULL;
     RTL_USER_PROCESS_PARAMETERS *params = NULL;
     RTL_USER_PROCESS_INFORMATION rtl_info;
     HANDLE parent = 0, debug = 0;
+    char *product_name;
     ULONG nt_flags = 0;
     USHORT machine = 0;
     NTSTATUS status;
@@ -603,6 +693,10 @@ BOOL WINAPI DECLSPEC_HOTPATCH CreateProcessInternalW( HANDLE token, const WCHAR 
         tidy_cmdline = extra_args;
     }
 
+    product_name = get_product_name( app_name );
+    if (battleye_launcher_redirect( app_name, name, ARRAY_SIZE(name), &orig_app_name, product_name ))
+        app_name = name;
+
     /* Warn if unsupported features are used */
 
     if (flags & (IDLE_PRIORITY_CLASS | HIGH_PRIORITY_CLASS | REALTIME_PRIORITY_CLASS |
@@ -627,6 +721,8 @@ BOOL WINAPI DECLSPEC_HOTPATCH CreateProcessInternalW( HANDLE token, const WCHAR 
         status = STATUS_NO_MEMORY;
         goto done;
     }
+    params = set_anticheat_env( params, app_name, tidy_cmdline, cur_dir, flags, startup_info,
+                                product_name, orig_app_name );
 
     if (flags & (DEBUG_PROCESS | DEBUG_ONLY_THIS_PROCESS))
     {
@@ -736,6 +832,8 @@ BOOL WINAPI DECLSPEC_HOTPATCH CreateProcessInternalW( HANDLE token, const WCHAR 
  done:
     RtlDestroyProcessParameters( params );
     if (tidy_cmdline != cmd_line) HeapFree( GetProcessHeap(), 0, tidy_cmdline );
+    HeapFree( GetProcessHeap(), 0, orig_app_name );
+    HeapFree( GetProcessHeap(), 0, product_name );
     return set_ntstatus( status );
 }
 

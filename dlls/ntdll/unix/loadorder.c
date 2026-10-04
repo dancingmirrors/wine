@@ -59,6 +59,7 @@ static HANDLE std_key;
 static HANDLE app_key;
 static BOOL init_done;
 static BOOL main_exe_loaded;
+static BOOL eac_launcher_process;
 
 
 /***************************************************************************
@@ -362,11 +363,80 @@ static enum loadorder get_load_order_value( HANDLE std_key, HANDLE app_key, WCHA
  */
 void set_load_order_app_name( const WCHAR *app_name )
 {
+    static const WCHAR eac_launcherW[] = {'P','R','O','T','O','N','_','E','A','C','_','L','A','U','N','C','H','E','R','_','P','R','O','C','E','S','S','=',0};
     const WCHAR *p;
 
     if ((p = wcsrchr( app_name, '\\' ))) app_name = p + 1;
     app_key = open_app_key( app_name );
     main_exe_loaded = TRUE;
+
+    if (!(p = NtCurrentTeb()->Peb->ProcessParameters->Environment)) return;
+    for (; *p; p += wcslen( p ) + 1)
+    {
+        if (wcsncmp( p, eac_launcherW, ARRAY_SIZE(eac_launcherW) - 1 )) continue;
+        eac_launcher_process = TRUE;
+        break;
+    }
+}
+
+
+static enum loadorder get_easyanticheat_load_order( const UNICODE_STRING *nt_name )
+{
+    static const WCHAR eac_x86W[] = {'e','a','s','y','a','n','t','i','c','h','e','a','t','_','x','8','6','.','d','l','l',0};
+    static const WCHAR eac_x64W[] = {'e','a','s','y','a','n','t','i','c','h','e','a','t','_','x','6','4','.','d','l','l',0};
+    static const WCHAR eacW[] = {'e','a','s','y','a','n','t','i','c','h','e','a','t','.','d','l','l',0};
+    static const WCHAR soW[] = {'.','s','o',0};
+    static int enabled = -1;
+    enum loadorder ret = LO_INVALID;
+    UNICODE_STRING so_name;
+    OBJECT_ATTRIBUTES attr;
+    const WCHAR *bridge;
+    WCHAR *name, *basename;
+    char *unix_name;
+    NTSTATUS status;
+    ULONG len;
+
+    if (enabled == -1)
+    {
+        const char *runtime = getenv( "PROTON_EAC_RUNTIME" );
+        enabled = runtime && *runtime;
+    }
+    if (!enabled) return LO_INVALID;
+
+    len = nt_name->Length / sizeof(WCHAR);
+    if (!(name = malloc( (len + ARRAY_SIZE(eac_x64W)) * sizeof(WCHAR) ))) return LO_INVALID;
+    memcpy( name, nt_name->Buffer, len * sizeof(WCHAR) );
+    name[len] = 0;
+    basename = get_basename( name );
+
+    if (!wcsicmp( basename, eac_x86W )) bridge = eac_x86W;
+    else if (!wcsicmp( basename, eac_x64W ) || !wcsicmp( basename, eacW )) bridge = eac_x64W;
+    else goto done;
+
+    if (eac_launcher_process)
+    {
+        ret = LO_NATIVE;
+        TRACE( "got %s for %s in the EasyAntiCheat launcher\n", debugstr_loadorder(ret), debugstr_w(name) );
+        goto done;
+    }
+
+    wcscpy( basename, bridge );
+    wcscpy( basename + wcslen( bridge ) - 4, soW );  /* replace .dll */
+    so_name.Buffer = name;
+    so_name.Length = so_name.MaximumLength = wcslen( name ) * sizeof(WCHAR);
+    InitializeObjectAttributes( &attr, &so_name, 0, NULL, NULL );
+    if ((status = nt_to_unix_file_name( &attr, &unix_name, FILE_OPEN )))
+    {
+        TRACE( "no native EasyAntiCheat client at %s, status %#x\n", debugstr_w(name), (int)status );
+        goto done;
+    }
+    free( unix_name );
+    ret = LO_BUILTIN;
+    TRACE( "got %s for the EasyAntiCheat bridge, found %s\n", debugstr_loadorder(ret), debugstr_w(name) );
+
+done:
+    free( name );
+    return ret;
 }
 
 
@@ -386,6 +456,8 @@ enum loadorder get_load_order( const UNICODE_STRING *nt_name )
     int len;
 
     if (!init_done) init_load_order();
+
+    if ((ret = get_easyanticheat_load_order( nt_name )) != LO_INVALID) return ret;
 
     if (!wcsncmp( path, prefixW, 4 )) path += 4;
 

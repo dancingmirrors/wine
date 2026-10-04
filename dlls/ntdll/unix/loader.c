@@ -369,12 +369,24 @@ static const char *get_pe_dir( WORD machine )
 }
 
 
+static const struct
+{
+    const char *var;
+    const char *dirs[2];
+} anticheat_runtimes[] =
+{
+    { "PROTON_BATTLEYE_RUNTIME", { "/v1/lib/wine", "/v1/lib64/wine" } },
+    { "PROTON_EAC_RUNTIME",      { "/v2/lib32", "/v2/lib64" } },
+};
+
 static void set_dll_path(void)
 {
     char *p, *path = getenv( "WINEDLLPATH" );
-    int i, count = 0;
+    const char *runtime;
+    int i, j, count = 0;
 
     if (path) for (p = path, count = 1; *p; p++) if (*p == ':') count++;
+    count += ARRAY_SIZE(anticheat_runtimes) * ARRAY_SIZE(anticheat_runtimes[0].dirs);
 
     dll_paths = malloc( (count + 2) * sizeof(*dll_paths) );
     count = 0;
@@ -386,6 +398,13 @@ static void set_dll_path(void)
         path = strdup(path);
         for (p = strtok( path, ":" ); p; p = strtok( NULL, ":" )) dll_paths[count++] = strdup( p );
         free( path );
+    }
+
+    for (i = 0; i < ARRAY_SIZE(anticheat_runtimes); i++)
+    {
+        if (!(runtime = getenv( anticheat_runtimes[i].var )) || !*runtime) continue;
+        for (j = 0; j < ARRAY_SIZE(anticheat_runtimes[i].dirs); j++)
+            if (asprintf( &p, "%s%s", runtime, anticheat_runtimes[i].dirs[j] ) != -1) dll_paths[count++] = p;
     }
 
     for (i = 0; i < count; i++) dll_path_maxlen = max( dll_path_maxlen, strlen(dll_paths[i]) );
