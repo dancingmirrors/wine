@@ -668,15 +668,18 @@ static BOOL start_debugger( EXCEPTION_POINTERS *epointers, HANDLE event )
     {
         /* wait for debugger to come up... */
         HANDLE handles[2];
+        DWORD exit_code;
+
         CloseHandle( info.hThread );
         handles[0] = event;
         handles[1] = info.hProcess;
-        WaitForMultipleObjects( 2, handles, FALSE, INFINITE );
+        if (WaitForMultipleObjects( 2, handles, FALSE, INFINITE ) == WAIT_OBJECT_0 + 1 &&
+            GetExitCodeProcess( info.hProcess, &exit_code ))
+            MESSAGE( "wine: debugger %s exited with status %#lx before handling the exception\n",
+                     debugstr_w(cmdline), exit_code );
         CloseHandle( info.hProcess );
     }
-    else ERR( "Couldn't start debugger %s (%ld)\n"
-              "Read the Wine Developers Guide on how to set up winedbg or another debugger\n",
-              debugstr_w(cmdline), GetLastError() );
+    else MESSAGE( "wine: couldn't start debugger %s (error %lu)\n", debugstr_w(cmdline), GetLastError() );
 exit:
     HeapFree(GetProcessHeap(), 0, cmdline);
     return ret;
