@@ -1580,12 +1580,15 @@ NTSTATUS WINAPI NtRaiseException( EXCEPTION_RECORD *rec, CONTEXT *context, BOOL 
     if (first_chance) return call_user_exception_dispatcher( rec, context );
 
     if (rec->ExceptionFlags & EXCEPTION_STACK_INVALID)
-        ERR_(seh)("Exception frame is not in stack limits => unable to dispatch exception.\n");
+        MESSAGE( "wine: exception frame is not in stack limits => unable to dispatch exception (thread %04x).\n",
+                 (int)GetCurrentThreadId() );
     else if (rec->ExceptionCode == STATUS_NONCONTINUABLE_EXCEPTION)
-        ERR_(seh)("Process attempted to continue execution after noncontinuable exception.\n");
+        MESSAGE( "wine: process attempted to continue execution after noncontinuable exception (thread %04x).\n",
+                 (int)GetCurrentThreadId() );
     else
-        ERR_(seh)("Unhandled exception code %x flags %x addr %p\n",
-                  (int)rec->ExceptionCode, (int)rec->ExceptionFlags, rec->ExceptionAddress );
+        MESSAGE( "wine: unhandled exception code %x flags %x addr %p (thread %04x), terminating process.\n",
+                 (int)rec->ExceptionCode, (int)rec->ExceptionFlags, rec->ExceptionAddress,
+                 (int)GetCurrentThreadId() );
 
     NtTerminateProcess( NtCurrentProcess(), rec->ExceptionCode );
     return STATUS_SUCCESS;
