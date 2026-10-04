@@ -649,7 +649,7 @@ static BOOL start_debugger( EXCEPTION_POINTERS *epointers, HANDLE event )
                 WCHAR *next = p + lstrlenW(p);
                 WCHAR *end = next + 1;
                 while (*end) end += lstrlenW(end) + 1;
-                memmove( p + 10, next, end + 1 - next );
+                memmove( p + 10, next, (end + 1 - next) * sizeof(WCHAR) );
                 break;
             }
         }
