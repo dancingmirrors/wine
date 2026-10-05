@@ -521,6 +521,7 @@ enum x11drv_atoms
     XATOM__GTK_WORKAREAS_D0,
     XATOM__XEMBED,
     XATOM__XEMBED_INFO,
+    XATOM__WINE_OTHER_PROCESS_CLIENT,
     XATOM_XdndAware,
     XATOM_XdndEnter,
     XATOM_XdndPosition,
@@ -683,6 +684,20 @@ extern Window create_client_window( HWND hwnd, const XVisualInfo *visual, Colorm
 extern void detach_client_window( struct x11drv_win_data *data, Window client_window );
 extern void attach_client_window( struct x11drv_win_data *data, Window client_window );
 extern void destroy_client_window( HWND hwnd, Window client_window );
+
+struct other_process_client
+{
+    Window window;
+    Window parent;
+    RECT   rect;
+    BOOL   mapped;
+    BOOL   dead;
+};
+
+extern BOOL create_other_process_client( HWND hwnd, const XVisualInfo *visual, Colormap colormap,
+                                         struct other_process_client *client );
+extern void update_other_process_client( HWND hwnd, struct other_process_client *client );
+extern void destroy_other_process_client( HWND hwnd, struct other_process_client *client );
 extern void set_window_visual( struct x11drv_win_data *data, const XVisualInfo *vis, BOOL use_alpha );
 extern void change_systray_owner( Display *display, Window systray_window );
 extern BOOL update_clipboard( HWND hwnd );

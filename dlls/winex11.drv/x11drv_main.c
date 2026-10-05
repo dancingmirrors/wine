@@ -160,6 +160,7 @@ static const char * const atom_names[NB_XATOMS - FIRST_XATOM] =
     "_GTK_WORKAREAS_D0",
     "_XEMBED",
     "_XEMBED_INFO",
+    "_WINE_OTHER_PROCESS_CLIENT",
     "XdndAware",
     "XdndEnter",
     "XdndPosition",

@@ -108,6 +108,9 @@ static const WCHAR whole_window_prop[] =
     {'_','_','w','i','n','e','_','x','1','1','_','w','h','o','l','e','_','w','i','n','d','o','w',0};
 static const WCHAR clip_window_prop[] =
     {'_','_','w','i','n','e','_','x','1','1','_','c','l','i','p','_','w','i','n','d','o','w',0};
+static const WCHAR other_process_client_prop[] =
+    {'_','_','w','i','n','e','_','x','1','1','_','o','t','h','e','r','_','p','r','o','c','e','s','s','_',
+     'c','l','i','e','n','t',0};
 
 static pthread_mutex_t win_data_mutex = PTHREAD_MUTEX_INITIALIZER;
 
@@ -2072,6 +2075,231 @@ Window create_client_window( HWND hwnd, const XVisualInfo *visual, Colormap colo
 }
 
 
+static pthread_mutex_t other_process_client_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+static Window get_other_process_client_holder(void)
+{
+    static Window holder;
+    XSetWindowAttributes attr;
+
+    if (holder) return holder;
+    attr.override_redirect = True;
+    holder = XCreateWindow( gdi_display, root_window, 0, 0, 1, 1, 0, CopyFromParent, InputOutput,
+                            CopyFromParent, CWOverrideRedirect, &attr );
+    return holder;
+}
+
+static BOOL client_window_exists( Window window )
+{
+    unsigned int width, height, border, depth;
+    Window root;
+    int x, y;
+
+    return XGetGeometry( gdi_display, window, &root, &x, &y, &width, &height, &border, &depth );
+}
+
+static Window get_other_process_whole_window( HWND hwnd )
+{
+    Window window;
+
+    if (hwnd == NtUserGetDesktopWindow() || NtUserGetAncestor( hwnd, GA_ROOT ) != hwnd) return 0;
+    if (!(window = X11DRV_get_whole_window( hwnd )) || window == root_window) return 0;
+    return window;
+}
+
+static BOOL get_other_process_client_pos( HWND hwnd, POINT *pos )
+{
+    struct rectangle region = {0};
+    data_size_t region_size = 0;
+    RECT visible, client, rect;
+    UINT dpi, raw_dpi;
+    NTSTATUS status;
+
+    SERVER_START_REQ( get_window_region )
+    {
+        req->window = wine_server_user_handle( hwnd );
+        req->surface = FALSE;
+        wine_server_set_reply( req, &region, sizeof(region) );
+        if (!(status = wine_server_call( req ))) region_size = wine_server_reply_size( reply );
+        visible = wine_server_get_rect( reply->visible_rect );
+    }
+    SERVER_END_REQ;
+
+    if (status && status != STATUS_BUFFER_OVERFLOW) return FALSE;
+    if (region_size && (region.left >= region.right || region.top >= region.bottom)) return FALSE;
+
+    if (!(dpi = NtUserGetDpiForWindow( hwnd ))) return FALSE;
+    if (!(raw_dpi = NtUserGetWinMonitorDpi( hwnd, MDT_RAW_DPI ))) raw_dpi = dpi;
+    if (!NtUserGetClientRect( hwnd, &client, dpi )) return FALSE;
+    NtUserMapWindowPoints( hwnd, 0, (POINT *)&client, 2, dpi );
+
+    OffsetRect( &client, -visible.left, -visible.top );
+    OffsetRect( &visible, -visible.left, -visible.top );
+    if (!intersect_rect( &rect, &client, &visible )) return FALSE;
+
+    pos->x = client.left * (int)raw_dpi / (int)dpi;
+    pos->y = client.top * (int)raw_dpi / (int)dpi;
+    return pos->x >= -32768 && pos->x <= 32767 && pos->y >= -32768 && pos->y <= 32767;
+}
+
+void update_other_process_client( HWND hwnd, struct other_process_client *client )
+{
+    XWindowChanges changes;
+    Window parent, holder;
+    BOOL flush = FALSE;
+    int mask = 0;
+    POINT pos;
+    RECT rect;
+
+    pthread_mutex_lock( &other_process_client_mutex );
+    if (client->dead) goto done;
+
+    holder = get_other_process_client_holder();
+    pos.x = client->rect.left;
+    pos.y = client->rect.top;
+    if (!(parent = get_other_process_whole_window( hwnd )) || !NtUserIsWindowVisible( hwnd ) ||
+        !get_other_process_client_pos( hwnd, &pos ))
+        parent = holder;
+
+    if (client->parent != parent)
+    {
+        TRACE( "%p reparenting client window %lx from %lx to %lx\n", hwnd, client->window, client->parent, parent );
+
+        if (client->mapped) XUnmapWindow( gdi_display, client->window );
+        client->mapped = FALSE;
+        flush = TRUE;
+
+        if (parent != holder) NtUserSetProp( hwnd, other_process_client_prop, (HANDLE)TRUE );
+
+        X11DRV_expect_error( gdi_display, host_window_error, NULL );
+        XReparentWindow( gdi_display, client->window, parent, pos.x, pos.y );
+        XSync( gdi_display, False );
+        if (X11DRV_check_error())
+        {
+            if (!client_window_exists( client->window ))
+            {
+                WARN( "%p client window %lx has been destroyed with its parent\n", hwnd, client->window );
+                client->dead = TRUE;
+            }
+            else WARN( "%p failed to reparent client window %lx to %lx\n", hwnd, client->window, parent );
+            goto done;
+        }
+
+        client->parent = parent;
+        OffsetRect( &client->rect, pos.x - client->rect.left, pos.y - client->rect.top );
+    }
+
+    if (!NtUserGetClientRect( hwnd, &rect, NtUserGetDpiForWindow( hwnd ) )) SetRectEmpty( &rect );
+    changes.x = pos.x;
+    changes.y = pos.y;
+    changes.width  = min( max( 1, rect.right - rect.left ), 65535 );
+    changes.height = min( max( 1, rect.bottom - rect.top ), 65535 );
+
+    if (changes.x != client->rect.left) mask |= CWX;
+    if (changes.y != client->rect.top) mask |= CWY;
+    if (changes.width != client->rect.right - client->rect.left) mask |= CWWidth;
+    if (changes.height != client->rect.bottom - client->rect.top) mask |= CWHeight;
+    if (mask)
+    {
+        TRACE( "%p configuring client window %lx to %d,%d %dx%d mask %#x, parent %lx client %s\n", hwnd,
+               client->window, changes.x, changes.y, changes.width, changes.height, mask, parent,
+               wine_dbgstr_rect( &rect ) );
+        XConfigureWindow( gdi_display, client->window, mask, &changes );
+        SetRect( &client->rect, changes.x, changes.y, changes.x + changes.width, changes.y + changes.height );
+        flush = TRUE;
+    }
+
+    if (parent != holder && !client->mapped)
+    {
+        TRACE( "%p mapping client window %lx\n", hwnd, client->window );
+        XMapWindow( gdi_display, client->window );
+        client->mapped = TRUE;
+        flush = TRUE;
+    }
+
+done:
+    if (flush) XFlush( gdi_display );
+    pthread_mutex_unlock( &other_process_client_mutex );
+}
+
+BOOL create_other_process_client( HWND hwnd, const XVisualInfo *visual, Colormap colormap,
+                                  struct other_process_client *client )
+{
+    XSetWindowAttributes attr;
+    unsigned long prop[2];
+    DWORD pid;
+
+    if (!NtUserGetWindowThread( hwnd, &pid ) || pid == GetCurrentProcessId()) return FALSE;
+    if (NtUserGetAncestor( hwnd, GA_ROOT ) != hwnd) return FALSE;
+
+    attr.colormap = colormap;
+    attr.bit_gravity = NorthWestGravity;
+    attr.win_gravity = NorthWestGravity;
+    attr.backing_store = NotUseful;
+    attr.border_pixel = 0;
+
+    memset( client, 0, sizeof(*client) );
+    SetRect( &client->rect, 0, 0, 1, 1 );
+
+    pthread_mutex_lock( &other_process_client_mutex );
+    client->parent = get_other_process_client_holder();
+    client->window = XCreateWindow( gdi_display, client->parent, 0, 0, 1, 1, 0, visual->depth, InputOutput,
+                                    visual->visual, CWBitGravity | CWWinGravity | CWBackingStore |
+                                    CWColormap | CWBorderPixel, &attr );
+    if (client->window)
+    {
+        prop[0] = HandleToUlong( hwnd );
+        prop[1] = client->parent;
+        XChangeProperty( gdi_display, client->window, x11drv_atom(_WINE_OTHER_PROCESS_CLIENT), XA_CARDINAL,
+                         32, PropModeReplace, (unsigned char *)prop, 2 );
+    }
+    pthread_mutex_unlock( &other_process_client_mutex );
+    if (!client->window) return FALSE;
+
+    TRACE( "%p created client window %lx for other process %04x\n", hwnd, client->window, pid );
+    update_other_process_client( hwnd, client );
+    return TRUE;
+}
+
+void destroy_other_process_client( HWND hwnd, struct other_process_client *client )
+{
+    TRACE( "%p destroying client window %lx\n", hwnd, client->window );
+
+    XDestroyWindow( gdi_display, client->window );
+    XFlush( gdi_display );
+}
+
+static void detach_other_process_clients( Window whole_window )
+{
+    Window xroot, xparent, *xchildren;
+    unsigned int i, nchildren;
+
+    if (!XQueryTree( gdi_display, whole_window, &xroot, &xparent, &xchildren, &nchildren )) return;
+
+    for (i = 0; i < nchildren; i++)
+    {
+        unsigned long count, remaining, *prop = NULL;
+        Atom type;
+        int format;
+
+        if (XGetWindowProperty( gdi_display, xchildren[i], x11drv_atom(_WINE_OTHER_PROCESS_CLIENT), 0, 2,
+                                False, XA_CARDINAL, &type, &format, &count, &remaining,
+                                (unsigned char **)&prop ))
+            continue;
+        if (type == XA_CARDINAL && format == 32 && count >= 2)
+        {
+            TRACE( "%lx moving other process client window %lx for %#lx to holder %lx\n", whole_window,
+                   xchildren[i], prop[0], prop[1] );
+            XUnmapWindow( gdi_display, xchildren[i] );
+            XReparentWindow( gdi_display, xchildren[i], prop[1], 0, 0 );
+        }
+        if (prop) XFree( prop );
+    }
+
+    if (xchildren) XFree( xchildren );
+}
+
+
 /**********************************************************************
  *		create_whole_window
  *
@@ -2167,6 +2395,11 @@ static void destroy_whole_window( struct x11drv_win_data *data, BOOL already_des
         XDeleteContext( data->display, data->whole_window, winContext );
         if (!already_destroyed)
         {
+            if (NtUserGetProp( data->hwnd, other_process_client_prop ))
+            {
+                NtUserRemoveProp( data->hwnd, whole_window_prop );
+                detach_other_process_clients( data->whole_window );
+            }
             XSync( gdi_display, False ); /* make sure XReparentWindow requests have completed before destroying whole_window */
             XDestroyWindow( data->display, data->whole_window );
         }

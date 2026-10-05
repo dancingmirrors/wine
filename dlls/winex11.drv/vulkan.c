@@ -60,11 +60,14 @@ struct x11drv_vulkan_surface
     BOOL offscreen;
     HDC hdc_src;
     HDC hdc_dst;
+
+    struct other_process_client other_process;
 };
 
 static void vulkan_surface_destroy( HWND hwnd, struct x11drv_vulkan_surface *surface )
 {
-    destroy_client_window( hwnd, surface->window );
+    if (surface->other_process.window) destroy_other_process_client( hwnd, &surface->other_process );
+    else destroy_client_window( hwnd, surface->window );
     if (surface->hdc_dst) NtGdiDeleteObjectApp( surface->hdc_dst );
     if (surface->hdc_src) NtGdiDeleteObjectApp( surface->hdc_src );
     free( surface );
@@ -86,7 +89,9 @@ static VkResult X11DRV_vulkan_surface_create( HWND hwnd, VkInstance instance, Vk
         ERR("Failed to allocate vulkan surface for hwnd=%p\n", hwnd);
         return VK_ERROR_OUT_OF_HOST_MEMORY;
     }
-    if (!(surface->window = create_client_window( hwnd, &default_visual, default_colormap )))
+    if (create_other_process_client( hwnd, &default_visual, default_colormap, &surface->other_process ))
+        surface->window = surface->other_process.window;
+    else if (!(surface->window = create_client_window( hwnd, &default_visual, default_colormap )))
     {
         ERR("Failed to allocate client window for hwnd=%p\n", hwnd);
         free( surface );
@@ -196,6 +201,12 @@ static void X11DRV_vulkan_surface_update( HWND hwnd, void *private )
 
     TRACE( "%p %p\n", hwnd, private );
 
+    if (surface->other_process.window)
+    {
+        update_other_process_client( hwnd, &surface->other_process );
+        return;
+    }
+
     vulkan_surface_update_size( hwnd, surface );
     vulkan_surface_update_offscreen( hwnd, surface );
 }
@@ -203,18 +214,25 @@ static void X11DRV_vulkan_surface_update( HWND hwnd, void *private )
 static void X11DRV_vulkan_surface_presented( HWND hwnd, void *private, VkResult result )
 {
     struct x11drv_vulkan_surface *surface = private;
-    HWND toplevel = NtUserGetAncestor( hwnd, GA_ROOT );
     struct x11drv_win_data *data;
     RECT rect_dst, rect;
     Drawable window;
+    HWND toplevel;
     HRGN region;
     HDC hdc;
+
+    if (surface->other_process.window)
+    {
+        update_other_process_client( hwnd, &surface->other_process );
+        return;
+    }
 
     vulkan_surface_update_size( hwnd, surface );
     vulkan_surface_update_offscreen( hwnd, surface );
 
     if (!surface->offscreen) return;
     if (!(hdc = NtUserGetDCEx( hwnd, 0, DCX_CACHE | DCX_USESTYLE ))) return;
+    toplevel = NtUserGetAncestor( hwnd, GA_ROOT );
     window = X11DRV_get_whole_window( toplevel );
     region = get_dc_monitor_region( hwnd, hdc );
 
