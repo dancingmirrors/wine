@@ -4618,6 +4618,13 @@ static BOOL show_window( HWND hwnd, INT cmd )
 
     TRACE( "hwnd=%p, cmd=%d, was_visible %d\n", hwnd, cmd, was_visible );
 
+    /* HACK: see is_default_ime_window() in input.c. */
+    if (cmd != SW_HIDE && hwnd == get_default_ime_window( hwnd ))
+    {
+        WARN( "refusing to show default IME window %p\n", hwnd );
+        return was_visible;
+    }
+
     context = set_thread_dpi_awareness_context( get_window_dpi_awareness_context( hwnd ));
 
     switch(cmd)

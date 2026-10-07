@@ -1878,6 +1878,17 @@ static HWND set_focus_window( HWND hwnd )
     return previous;
 }
 
+/* HACK: Some applications restyle and show the per-thread "Default IME"
+ * window which then steals activation from the real window. Windows never
+ * activates it.
+ */
+static BOOL is_default_ime_window( HWND hwnd )
+{
+    if (!hwnd) return FALSE;
+    hwnd = get_full_window_handle( hwnd );
+    return hwnd == get_default_ime_window( hwnd );
+}
+
 /*******************************************************************
  *		set_active_window
  */
@@ -1887,6 +1898,13 @@ BOOL set_active_window( HWND hwnd, HWND *prev, BOOL mouse, BOOL focus, DWORD new
     BOOL ret = TRUE;
     DWORD winflags, old_thread, new_thread;
     CBTACTIVATESTRUCT cbt;
+
+    if (is_default_ime_window( hwnd ))
+    {
+        WARN( "refusing to activate default IME window %p\n", hwnd );
+        if (prev) *prev = previous;
+        return FALSE;
+    }
 
     if (previous == hwnd)
     {
@@ -2111,6 +2129,11 @@ BOOL set_foreground_window( HWND hwnd, BOOL mouse )
     HWND previous = 0;
 
     if (mouse) hwnd = get_full_window_handle( hwnd );
+    if (is_default_ime_window( hwnd ))
+    {
+        WARN( "refusing to make default IME window %p the foreground window\n", hwnd );
+        return FALSE;
+    }
     new_thread_id = get_window_thread( hwnd, NULL );
 
     SERVER_START_REQ( set_foreground_window )
