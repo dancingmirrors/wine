@@ -1837,9 +1837,16 @@ static USHORT WINAPI media_engine_GetReadyState(IMFMediaEngineEx *iface)
 
 static BOOL WINAPI media_engine_IsSeeking(IMFMediaEngineEx *iface)
 {
-    FIXME("(%p): stub.\n", iface);
+    struct media_engine *engine = impl_from_IMFMediaEngineEx(iface);
+    BOOL value;
 
-    return FALSE;
+    TRACE("%p.\n", iface);
+
+    EnterCriticalSection(&engine->cs);
+    value = !(engine->flags & FLAGS_ENGINE_SHUT_DOWN) && (engine->flags & FLAGS_ENGINE_SEEKING);
+    LeaveCriticalSection(&engine->cs);
+
+    return value;
 }
 
 static double WINAPI media_engine_GetCurrentTime(IMFMediaEngineEx *iface)
