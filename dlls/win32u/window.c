@@ -1497,10 +1497,11 @@ static int window_has_client_surface( HWND hwnd )
     BOOL ret;
 
     if (!win || win == WND_DESKTOP || win == WND_OTHER_PROCESS) return FALSE;
-    ret = win->pixel_format || win->internal_pixel_format || !list_empty(&win->vulkan_surfaces);
+    ret = win->pixel_format || win->internal_pixel_format;
+    hwnd = win->obj.handle;
     release_win_ptr( win );
 
-    return ret;
+    return ret || vulkan_window_has_surfaces( hwnd );
 }
 
 /***********************************************************************
@@ -5087,7 +5088,6 @@ static void free_window_handle( HWND hwnd )
  */
 LRESULT destroy_window( HWND hwnd )
 {
-    struct list vulkan_surfaces = LIST_INIT(vulkan_surfaces);
     struct window_surface *surface;
     HMENU menu = 0, sys_menu;
     WND *win;
@@ -5134,7 +5134,6 @@ LRESULT destroy_window( HWND hwnd )
     free_dce( win->dce, hwnd );
     win->dce = NULL;
     NtUserDestroyCursor( win->hIconSmall2, 0 );
-    list_move_tail( &vulkan_surfaces, &win->vulkan_surfaces );
     surface = win->surface;
     win->surface = NULL;
     release_win_ptr( win );
@@ -5147,7 +5146,7 @@ LRESULT destroy_window( HWND hwnd )
         window_surface_release( surface );
     }
 
-    vulkan_detach_surfaces( &vulkan_surfaces );
+    vulkan_detach_surfaces( hwnd );
     user_driver->pDestroyWindow( hwnd );
 
     free_window_handle( hwnd );
@@ -5275,8 +5274,8 @@ void destroy_thread_windows(void)
         free_list = (WND *)win->userdata;
         TRACE( "destroying %p\n", win );
 
+        vulkan_detach_surfaces( win->obj.handle );
         user_driver->pDestroyWindow( win->obj.handle );
-        vulkan_detach_surfaces( &win->vulkan_surfaces );
 
         if ((win->dwStyle & (WS_CHILD | WS_POPUP)) != WS_CHILD && win->wIDmenu)
             NtUserDestroyMenu( UlongToHandle(win->wIDmenu) );
@@ -5376,7 +5375,6 @@ static WND *create_window_handle( HWND parent, HWND owner, UNICODE_STRING *name,
     win->winproc    = get_class_winproc( class );
     win->cbWndExtra = extra_bytes;
     win->dpi_context = dpi_context;
-    list_init( &win->vulkan_surfaces );
     set_user_handle_ptr( handle, &win->obj );
     if (is_winproc_unicode( win->winproc, !ansi )) win->flags |= WIN_ISUNICODE;
     return win;

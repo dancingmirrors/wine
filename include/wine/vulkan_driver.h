@@ -359,6 +359,8 @@ struct vulkan_driver_funcs
 {
     VkResult (*p_vulkan_surface_create)(HWND, VkInstance, VkSurfaceKHR *, void **);
     void (*p_vulkan_surface_destroy)(HWND, void *);
+    /* detach, update and presented are called with the win32u surfaces lock held so they must not
+     * send messages, create, move or destroy windows, or call Vulkan surface or swapchain functions. */
     void (*p_vulkan_surface_detach)(HWND, void *);
     void (*p_vulkan_surface_update)(HWND, void *);
     void (*p_vulkan_surface_presented)(HWND, void *, VkResult);

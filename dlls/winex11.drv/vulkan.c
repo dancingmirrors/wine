@@ -130,6 +130,12 @@ static void X11DRV_vulkan_surface_detach( HWND hwnd, void *private )
 
     TRACE( "%p %p\n", hwnd, private );
 
+    if (surface->other_process.window)
+    {
+        update_other_process_client( NULL, &surface->other_process );
+        return;
+    }
+
     if ((data = get_win_data( hwnd )))
     {
         detach_client_window( data, client_window );
@@ -142,7 +148,7 @@ static void vulkan_surface_update_size( HWND hwnd, struct x11drv_vulkan_surface 
     XWindowChanges changes;
     RECT rect;
 
-    NtUserGetClientRect( hwnd, &rect, NtUserGetDpiForWindow( hwnd ) );
+    if (!NtUserGetClientRect( hwnd, &rect, NtUserGetDpiForWindow( hwnd ) )) return;
     if (EqualRect( &surface->rect, &rect )) return;
 
     changes.width  = min( max( 1, rect.right ), 65535 );

@@ -171,7 +171,6 @@ struct surface
     HWND hwnd;
 
     struct list entry;
-    struct rb_entry window_entry;
 };
 
 static struct surface *surface_from_handle( VkSurfaceKHR handle )
@@ -180,43 +179,40 @@ static struct surface *surface_from_handle( VkSurfaceKHR handle )
     return CONTAINING_RECORD( obj, struct surface, obj );
 }
 
-static int window_surface_compare( const void *key, const struct rb_entry *entry )
-{
-    const struct surface *surface = RB_ENTRY_VALUE( entry, struct surface, window_entry );
-    HWND key_hwnd = (HWND)key;
+static pthread_mutex_t surfaces_lock = PTHREAD_MUTEX_INITIALIZER;
+static struct list surfaces = LIST_INIT( surfaces );
 
-    if (key_hwnd < surface->hwnd) return -1;
-    if (key_hwnd > surface->hwnd) return 1;
-    return 0;
-}
-
-static pthread_mutex_t window_surfaces_lock = PTHREAD_MUTEX_INITIALIZER;
-static struct rb_tree window_surfaces = {.compare = window_surface_compare};
-
-static void window_surfaces_insert( struct surface *surface )
+static void surfaces_insert( struct surface *surface )
 {
     struct surface *previous;
-    struct rb_entry *ptr;
 
-    pthread_mutex_lock( &window_surfaces_lock );
-
-    if (!(ptr = rb_get( &window_surfaces, surface->hwnd )))
-        rb_put( &window_surfaces, surface->hwnd, &surface->window_entry );
-    else
+    if (!surface->hwnd)
     {
-        previous = RB_ENTRY_VALUE( ptr, struct surface, window_entry );
-        rb_replace( &window_surfaces, &previous->window_entry, &surface->window_entry );
-        previous->hwnd = 0; /* make sure previous surface becomes invalid */
+        list_init( &surface->entry );
+        return;
     }
 
-    pthread_mutex_unlock( &window_surfaces_lock );
+    pthread_mutex_lock( &surfaces_lock );
+
+    LIST_FOR_EACH_ENTRY( previous, &surfaces, struct surface, entry )
+    {
+        if (previous->hwnd != surface->hwnd) continue;
+        driver_funcs->p_vulkan_surface_detach( previous->hwnd, previous->driver_private );
+        list_remove( &previous->entry );
+        list_init( &previous->entry );
+        previous->hwnd = 0; /* make sure previous surface becomes invalid */
+        break;
+    }
+    list_add_tail( &surfaces, &surface->entry );
+
+    pthread_mutex_unlock( &surfaces_lock );
 }
 
-static void window_surfaces_remove( struct surface *surface )
+static void surfaces_remove( struct surface *surface )
 {
-    pthread_mutex_lock( &window_surfaces_lock );
-    if (surface->hwnd) rb_remove( &window_surfaces, &surface->window_entry );
-    pthread_mutex_unlock( &window_surfaces_lock );
+    pthread_mutex_lock( &surfaces_lock );
+    list_remove( &surface->entry );
+    pthread_mutex_unlock( &surfaces_lock );
 }
 
 struct swapchain
@@ -1613,7 +1609,6 @@ static VkResult win32u_vkCreateWin32SurfaceKHR( VkInstance client_instance, cons
     struct surface *surface;
     HWND dummy = NULL;
     VkResult res;
-    WND *win;
 
     TRACE( "client_instance %p, create_info %p, allocator %p, ret %p\n", client_instance, create_info, allocator, ret );
     if (allocator) FIXME( "Support for allocation callbacks not implemented yet\n" );
@@ -1621,7 +1616,7 @@ static VkResult win32u_vkCreateWin32SurfaceKHR( VkInstance client_instance, cons
     if (!(surface = calloc( 1, sizeof(*surface) ))) return VK_ERROR_OUT_OF_HOST_MEMORY;
 
     /* Windows allows surfaces to be created with no HWND, they return VK_ERROR_SURFACE_LOST_KHR later */
-    if (!(surface->hwnd = create_info->hwnd))
+    if (!(surface->hwnd = get_full_window_handle( create_info->hwnd )))
     {
         static const WCHAR staticW[] = {'s','t','a','t','i','c',0};
         UNICODE_STRING static_us = RTL_CONSTANT_STRING( staticW );
@@ -1639,20 +1634,13 @@ static VkResult win32u_vkCreateWin32SurfaceKHR( VkInstance client_instance, cons
         return res;
     }
 
-    if (!(win = get_win_ptr( surface->hwnd )) || win == WND_DESKTOP || win == WND_OTHER_PROCESS)
-        list_init( &surface->entry );
-    else
-    {
-        list_add_tail( &win->vulkan_surfaces, &surface->entry );
-        release_win_ptr( win );
-    }
+    surfaces_insert( surface );
 
     vulkan_object_init( &surface->obj.obj, host_surface );
     surface->obj.instance = instance;
     instance->p_insert_object( instance, &surface->obj.obj );
 
     if (dummy) NtUserDestroyWindow( dummy );
-    window_surfaces_insert( surface );
 
     *ret = surface->obj.client.surface;
     return VK_SUCCESS;
@@ -1663,24 +1651,18 @@ static void win32u_vkDestroySurfaceKHR( VkInstance client_instance, VkSurfaceKHR
 {
     struct vulkan_instance *instance = vulkan_instance_from_handle( client_instance );
     struct surface *surface = surface_from_handle( client_surface );
-    WND *win;
 
     if (!surface) return;
 
     TRACE( "instance %p, handle 0x%s, allocator %p\n", instance, wine_dbgstr_longlong( client_surface ), allocator );
     if (allocator) FIXME( "Support for allocation callbacks not implemented yet\n" );
 
-    if ((win = get_win_ptr( surface->hwnd )) && win != WND_DESKTOP && win != WND_OTHER_PROCESS)
-    {
-        list_remove( &surface->entry );
-        release_win_ptr( win );
-    }
+    surfaces_remove( surface );
 
     instance->p_vkDestroySurfaceKHR( instance->host.instance, surface->obj.host.surface, NULL /* allocator */ );
     driver_funcs->p_vulkan_surface_destroy( surface->hwnd, surface->driver_private );
 
     instance->p_remove_object( instance, &surface->obj.obj );
-    window_surfaces_remove( surface );
 
     free( surface );
 }
@@ -1693,7 +1675,7 @@ static BOOL get_surface_rect( HWND hwnd, RECT *rect )
 static void adjust_surface_capabilities( struct vulkan_instance *instance, struct surface *surface,
                                          VkSurfaceCapabilitiesKHR *capabilities )
 {
-    RECT client_rect;
+    RECT client_rect = {0};
 
     /* Many Windows games, for example Strange Brigade, No Man's Sky, Path of Exile
      * and World War Z, do not expect that maxImageCount can be set to 0.
@@ -1945,7 +1927,9 @@ static VkResult win32u_vkCreateSwapchainKHR( VkDevice client_device, const VkSwa
     if (old_swapchain) create_info_host.oldSwapchain = old_swapchain->obj.host.swapchain;
 
     /* update the host surface to commit any pending size change */
-    driver_funcs->p_vulkan_surface_update( surface->hwnd, surface->driver_private );
+    pthread_mutex_lock( &surfaces_lock );
+    if (surface->hwnd) driver_funcs->p_vulkan_surface_update( surface->hwnd, surface->driver_private );
+    pthread_mutex_unlock( &surfaces_lock );
 
     /* Windows allows client rect to be empty, but host Vulkan often doesn't, adjust extents back to the host capabilities */
     res = instance->p_vkGetPhysicalDeviceSurfaceCapabilitiesKHR( physical_device->host.physical_device, surface->obj.host.surface, &capabilities );
@@ -2080,13 +2064,17 @@ static VkResult win32u_vkQueuePresentKHR( VkQueue client_queue, const VkPresentI
         VkResult swapchain_res = present_info->pResults ? present_info->pResults[i] : res;
         struct surface *surface = swapchain->surface;
         RECT client_rect;
+        HWND hwnd;
 
-        driver_funcs->p_vulkan_surface_presented( surface->hwnd, surface->driver_private, swapchain_res );
+        pthread_mutex_lock( &surfaces_lock );
+        if ((hwnd = surface->hwnd))
+            driver_funcs->p_vulkan_surface_presented( hwnd, surface->driver_private, swapchain_res );
+        pthread_mutex_unlock( &surfaces_lock );
 
         if (swapchain_res < VK_SUCCESS) continue;
-        if (!get_surface_rect( surface->hwnd, &client_rect ))
+        if (!get_surface_rect( hwnd, &client_rect ))
         {
-            WARN( "Swapchain window %p is invalid, returning VK_ERROR_OUT_OF_DATE_KHR\n", surface->hwnd );
+            WARN( "Swapchain window %p is invalid, returning VK_ERROR_OUT_OF_DATE_KHR\n", hwnd );
             if (present_info->pResults) present_info->pResults[i] = VK_ERROR_OUT_OF_DATE_KHR;
             if (res >= VK_SUCCESS) res = VK_ERROR_OUT_OF_DATE_KHR;
         }
@@ -3251,16 +3239,37 @@ failed:
     free( properties );
 }
 
-void vulkan_detach_surfaces( struct list *surfaces )
+void vulkan_detach_surfaces( HWND hwnd )
 {
     struct surface *surface, *next;
 
-    LIST_FOR_EACH_ENTRY_SAFE( surface, next, surfaces, struct surface, entry )
+    pthread_mutex_lock( &surfaces_lock );
+
+    LIST_FOR_EACH_ENTRY_SAFE( surface, next, &surfaces, struct surface, entry )
     {
+        if (surface->hwnd != hwnd) continue;
         driver_funcs->p_vulkan_surface_detach( surface->hwnd, surface->driver_private );
         list_remove( &surface->entry );
         list_init( &surface->entry );
+        surface->hwnd = NULL;
     }
+
+    pthread_mutex_unlock( &surfaces_lock );
+}
+
+BOOL vulkan_window_has_surfaces( HWND hwnd )
+{
+    struct surface *surface;
+    BOOL ret = FALSE;
+
+    pthread_mutex_lock( &surfaces_lock );
+
+    LIST_FOR_EACH_ENTRY( surface, &surfaces, struct surface, entry )
+        if ((ret = surface->hwnd == hwnd)) break;
+
+    pthread_mutex_unlock( &surfaces_lock );
+
+    return ret;
 }
 
 /***********************************************************************

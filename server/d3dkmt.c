@@ -773,11 +773,8 @@ DECL_HANDLER(d3dkmt_mutex_acquire)
     release_object( mutex );
 
 done:
-    if (get_error() != STATUS_PENDING && req->wait_handle)
-    {
-        close_handle( current->process, req->wait_handle );
-        if (mutex) keyed_wait_release( mutex, req->key_value );
-    }
+    if (get_error() != STATUS_PENDING && req->wait_handle && mutex)
+        keyed_wait_release( mutex, req->key_value );
 }
 
 /* Release a global d3dkmt keyed mutex */

@@ -75,7 +75,6 @@ typedef struct tagWND
     HIMC               imc;           /* window's input context */
     UINT               dpi_context;   /* window DPI awareness context */
     struct window_surface *surface;   /* Window surface if any */
-    struct list        vulkan_surfaces; /* list of vulkan surfaces created for this window */
     struct tagDIALOGINFO *dlgInfo;    /* Dialog additional info (dialogs only) */
     int                pixel_format;  /* Pixel format set by the graphics driver */
     int                internal_pixel_format; /* Internal pixel format set via WGL_WINE_pixel_format_passthrough */
@@ -226,7 +225,8 @@ extern LRESULT system_tray_call( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
 
 /* vulkan.c */
 extern struct vulkan_instance *vulkan_instance_create( const struct vulkan_instance_extensions *extensions );
-extern void vulkan_detach_surfaces( struct list *surfaces );
+extern void vulkan_detach_surfaces( HWND hwnd );
+extern BOOL vulkan_window_has_surfaces( HWND hwnd );
 
 /* window.c */
 HANDLE alloc_user_handle( struct user_object *ptr, unsigned int type );
