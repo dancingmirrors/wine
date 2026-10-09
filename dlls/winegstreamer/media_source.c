@@ -900,7 +900,10 @@ static DWORD CALLBACK read_thread(void *arg)
         HRESULT hr;
 
         if (!wg_parser_get_next_read_offset(source->wg_parser, &offset, &size))
+        {
+            Sleep(1);
             continue;
+        }
 
         if (offset >= file_size)
             size = 0;
