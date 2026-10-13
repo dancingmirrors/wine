@@ -1,0 +1,13 @@
+MODULE    = dxva2.dll
+IMPORTS   = uuid ole32 advapi32
+IMPORTLIB = dxva2
+UNIXLIB   = dxva2.so
+UNIX_CFLAGS = $(VA_CFLAGS)
+UNIX_LIBS   = $(VA_LIBS)
+
+EXTRADLLFLAGS = -Wb,--prefer-native
+
+SOURCES = \
+	h264_slice.c \
+	main.c \
+	va.c
