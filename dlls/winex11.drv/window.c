@@ -909,6 +909,22 @@ static void set_size_hints( struct x11drv_win_data *data, DWORD style )
     XFree( size_hints );
 }
 
+static void set_desktop_size_hints( Display *display, Window win, int width, int height )
+{
+    XSizeHints *size_hints;
+
+    if (!(size_hints = XAllocSizeHints())) return;
+    size_hints->win_gravity = NorthWestGravity;
+    size_hints->flags = PWinGravity;
+    if (!is_desktop_fullscreen() && width > 0 && height > 0)
+    {
+        size_hints->min_width = size_hints->max_width = width;
+        size_hints->min_height = size_hints->max_height = height;
+        size_hints->flags |= PMinSize | PMaxSize;
+    }
+    XSetWMNormalHints( display, win, size_hints );
+    XFree( size_hints );
+}
 
 /***********************************************************************
  *              set_mwm_hints
@@ -1336,6 +1352,8 @@ static void window_set_config( struct x11drv_win_data *data, const RECT *new_rec
         if (changes.width > 65535) changes.width = 65535;
         if (changes.height > 65535) changes.height = 65535;
         mask |= CWWidth | CWHeight;
+        if (data->whole_window == root_window)
+            set_desktop_size_hints( data->display, root_window, changes.width, changes.height );
     }
 
     /* only the size is allowed to change for the desktop window or systray docked windows */
@@ -2588,12 +2606,15 @@ static BOOL create_desktop_win_data( Window win, HWND hwnd )
     struct x11drv_thread_data *thread_data = x11drv_thread_data();
     Display *display = thread_data->display;
     struct x11drv_win_data *data;
+    RECT rect;
 
     if (!(data = alloc_win_data( display, hwnd ))) return FALSE;
     data->whole_window = win;
     data->managed = TRUE;
     NtUserSetProp( data->hwnd, whole_window_prop, (HANDLE)win );
     set_initial_wm_hints( display, win );
+    rect = NtUserGetVirtualScreenRect( MDT_DEFAULT );
+    set_desktop_size_hints( display, win, rect.right - rect.left, rect.bottom - rect.top );
     release_win_data( data );
     if (thread_data->clip_window) XReparentWindow( display, thread_data->clip_window, win, 0, 0 );
     return TRUE;
