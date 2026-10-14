@@ -195,6 +195,18 @@ static HRESULT tiff_get_decode_info(TIFF *tiff, tiff_decode_info *decode_info)
         return E_FAIL;
     }
 
+    if (photometric == PHOTOMETRIC_YCBCR)
+    {
+        uint16_t compression = COMPRESSION_NONE;
+
+        TIFFGetField(tiff, TIFFTAG_COMPRESSION, &compression);
+        if (compression == COMPRESSION_JPEG)
+        {
+            TIFFSetField(tiff, TIFFTAG_JPEGCOLORMODE, JPEGCOLORMODE_RGB);
+            photometric = PHOTOMETRIC_RGB;
+        }
+    }
+
     ret = TIFFGetField(tiff, TIFFTAG_BITSPERSAMPLE, &bps);
     if (!ret) bps = 1;
     decode_info->bps = bps;

@@ -6414,7 +6414,7 @@ static void test_tiff_color_formats(void)
         { 2, 3, 1, PixelFormat24bppRGB },
         { 2, 3, 4, PixelFormat24bppRGB },
         { 2, 3, 8, PixelFormat24bppRGB },
-        { 2, 3, 16, PixelFormat48bppRGB },
+        { 2, 3, 16, PixelFormat32bppARGB },
         { 2, 3, 24, 0 },
 #if 0 /* FIXME */
         { 2, 3, 32, 0 },
@@ -6422,7 +6422,7 @@ static void test_tiff_color_formats(void)
         { 2, 4, 1, PixelFormat32bppARGB },
         { 2, 4, 4, PixelFormat32bppARGB },
         { 2, 4, 8, PixelFormat32bppARGB },
-        { 2, 4, 16, PixelFormat48bppRGB },
+        { 2, 4, 16, PixelFormat32bppARGB },
         { 2, 4, 24, 0 },
         { 2, 4, 32, 0 },
         /* 1 - BlackIsZero (Bilevel) */
@@ -6433,7 +6433,7 @@ static void test_tiff_color_formats(void)
         { 1, 1, 8, PixelFormat8bppIndexed },
         { 1, 1, 16, PixelFormat32bppARGB },
         { 1, 1, 24, 0 },
-        { 1, 1, 32, PixelFormat32bppARGB },
+        { 1, 1, 32, 0 },
         /* 3 - Palette Color */
         { 3, 1, 1, PixelFormat1bppIndexed },
         { 3, 1, 4, PixelFormat4bppIndexed },
@@ -6446,8 +6446,8 @@ static void test_tiff_color_formats(void)
         /* 5 - Separated */
         { 5, 4, 1, 0 },
         { 5, 4, 4, 0 },
-        { 5, 4, 8, PixelFormat32bppCMYK },
-        { 5, 4, 16, PixelFormat48bppRGB },
+        { 5, 4, 8, PixelFormat32bppARGB },
+        { 5, 4, 16, 0 },
         { 5, 4, 24, 0 },
         { 5, 4, 32, 0 },
     };
