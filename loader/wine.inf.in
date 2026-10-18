@@ -49,6 +49,10 @@ AddService=MountMgr,0x800,MountMgrService
 [FakeDllsPreInstall]
 11,,winedevice.exe
 12,,mountmgr.sys
+; stubs that winedevice loads on startup
+11,,win32k.sys
+12,,dxgkrnl.sys
+12,,dxgmms1.sys
 
 [DefaultInstall]
 RegisterDlls=RegisterDllsSection

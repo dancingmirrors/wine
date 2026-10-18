@@ -954,7 +954,7 @@ NTSTATUS bluez_dbus_loop( void *c, void *watcher,
                 p_dbus_error_free( &error );
                 p_dbus_message_unref( reply );
                 p_dbus_connection_unref( connection );
-                return STATUS_NO_MEMORY;
+                return STATUS_NOT_SUPPORTED;
             }
             status = bluez_build_initial_device_lists( reply, &watcher_ctx->initial_radio_list );
             p_dbus_message_unref( reply );

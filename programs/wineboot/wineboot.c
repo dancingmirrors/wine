@@ -1413,7 +1413,8 @@ static void process_run_key( HKEY key, const WCHAR *keyname, BOOL delete, BOOL s
         }
         if (runCmd( cmdline, NULL, synchronous, FALSE ) == INVALID_RUNCMD_RETURN)
         {
-            WINE_ERR( "Error running cmd %s (%lu).\n", wine_dbgstr_w(cmdline), GetLastError() );
+            if (GetLastError() != ERROR_MOD_NOT_FOUND)
+                WINE_ERR( "Error running cmd %s (%lu).\n", wine_dbgstr_w(cmdline), GetLastError() );
         }
         WINE_TRACE( "Done processing cmd %lu.\n", i );
     }

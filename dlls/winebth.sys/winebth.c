@@ -172,6 +172,7 @@ void WINAPIV append_id( struct string_buffer *buffer, const WCHAR *format, ... )
 }
 
 
+static BOOL bluetooth_available;
 static HANDLE event_loop_thread;
 static NTSTATUS radio_get_hw_name_w( winebluetooth_radio_t radio, WCHAR **name )
 {
@@ -344,8 +345,10 @@ static DWORD CALLBACK bluetooth_event_loop_thread_proc( void *arg )
         }
     }
 
-    if (status != STATUS_SUCCESS)
-        ERR( "Bluetooth event loop terminated with %#lx", status );
+    if (status == STATUS_NOT_SUPPORTED)
+        WARN( "BlueZ is not available, exiting bluetooth event loop\n" );
+    else if (status != STATUS_SUCCESS)
+        ERR( "Bluetooth event loop terminated with %#lx\n", status );
     else
         TRACE( "Exiting bluetooth event loop\n" );
     return 0;
@@ -395,8 +398,9 @@ static NTSTATUS WINAPI fdo_pnp( DEVICE_OBJECT *device_obj, IRP *irp )
             break;
         }
         case IRP_MN_START_DEVICE:
-            event_loop_thread =
-                CreateThread( NULL, 0, bluetooth_event_loop_thread_proc, NULL, 0, NULL );
+            if (bluetooth_available)
+                event_loop_thread =
+                    CreateThread( NULL, 0, bluetooth_event_loop_thread_proc, NULL, 0, NULL );
             irp->IoStatus.Status = STATUS_SUCCESS;
             break;
         case IRP_MN_SURPRISE_REMOVAL:
@@ -406,9 +410,12 @@ static NTSTATUS WINAPI fdo_pnp( DEVICE_OBJECT *device_obj, IRP *irp )
         {
             struct bluetooth_radio *device, *cur;
             NTSTATUS ret;
-            winebluetooth_shutdown();
-            WaitForSingleObject( event_loop_thread, INFINITE );
-            CloseHandle( event_loop_thread );
+            if (bluetooth_available)
+            {
+                winebluetooth_shutdown();
+                WaitForSingleObject( event_loop_thread, INFINITE );
+                CloseHandle( event_loop_thread );
+            }
             EnterCriticalSection( &device_list_cs );
             LIST_FOR_EACH_ENTRY_SAFE( device, cur, &device_list, struct bluetooth_radio, entry )
             {
@@ -596,7 +603,9 @@ NTSTATUS WINAPI DriverEntry( DRIVER_OBJECT *driver, UNICODE_STRING *path )
 
     status = winebluetooth_init();
     if (status)
-        return status;
+        WARN( "Bluetooth is not available: %#lx\n", status );
+    else
+        bluetooth_available = TRUE;
 
     driver_obj = driver;
 
