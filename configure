@@ -21390,7 +21390,7 @@ fi
 printf '%s\n' "$ac_cv_mabi_ms" >&6; }
            if test "x$ac_cv_mabi_ms" = xyes
 then :
-  if test "x$PE_ARCHS" = x
+  if ${PE_ARCHS:+false} :
 then :
   MSVCRTFLAGS="$MSVCRTFLAGS -mabi=ms"
 else case e in #(
