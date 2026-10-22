@@ -3495,6 +3495,175 @@ static void test_rotateflip(void)
     GdipDisposeImage(bitmap);
 }
 
+static UINT rotateflip_pattern(UINT x, UINT y)
+{
+    UINT value = x * 2654435761u + y * 40503u;
+
+    return value ^ (value >> 15);
+}
+
+static void rotateflip_point(RotateFlipType type, UINT width, UINT height, UINT *x, UINT *y)
+{
+    UINT i, tmp;
+
+    for (i = 0; i < (type & 3); i++)
+    {
+        tmp = *x;
+        *x = height - 1 - *y;
+        *y = tmp;
+        tmp = width;
+        width = height;
+        height = tmp;
+    }
+
+    if (type & 4)
+        *x = width - 1 - *x;
+}
+
+static UINT get_packed_pixel(const BYTE *bits, INT stride, UINT bpp, UINT x, UINT y)
+{
+    const BYTE *pixel = bits + stride * (INT)y + x * bpp / 8;
+    UINT i, value = 0;
+
+    if (bpp < 8)
+        return (*pixel >> (8 - bpp - x * bpp % 8)) & ((1 << bpp) - 1);
+
+    for (i = 0; i < bpp / 8; i++)
+        value |= pixel[i] << (i * 8);
+    return value;
+}
+
+static void set_packed_pixel(BYTE *bits, INT stride, UINT bpp, UINT x, UINT y, UINT value)
+{
+    BYTE *pixel = bits + stride * (INT)y + x * bpp / 8;
+    UINT i, shift;
+
+    if (bpp < 8)
+    {
+        shift = 8 - bpp - x * bpp % 8;
+        *pixel &= ~(((1 << bpp) - 1) << shift);
+        *pixel |= (value & ((1 << bpp) - 1)) << shift;
+        return;
+    }
+
+    for (i = 0; i < bpp / 8; i++)
+        pixel[i] = value >> (i * 8);
+}
+
+static void test_rotateflip_formats(void)
+{
+    static const PixelFormat formats[] =
+    {
+        PixelFormat1bppIndexed,
+        PixelFormat4bppIndexed,
+        PixelFormat8bppIndexed,
+        PixelFormat24bppRGB,
+        PixelFormat32bppARGB,
+    };
+    static const UINT src_width = 13, src_height = 10;
+    BYTE bits[52 * 10], orig_bits[sizeof(bits)];
+    BYTE palette_buf[1040], new_palette_buf[1040];
+    ColorPalette *palette = (ColorPalette *)palette_buf, *new_palette = (ColorPalette *)new_palette_buf;
+    UINT i, j, type, bpp, mask, x, y, new_x, new_y, width, height, wrong;
+    INT stride, bottom_up;
+    PixelFormat format;
+    BitmapData data;
+    GpBitmap *bitmap;
+    GpStatus stat;
+    BYTE *scan0;
+
+    for (i = 0; i < ARRAY_SIZE(formats); i++)
+    {
+        bpp = GetPixelFormatSize(formats[i]);
+        mask = bpp < 32 ? (1u << bpp) - 1 : ~0u;
+
+        for (bottom_up = 0; bottom_up <= 1; bottom_up++)
+        {
+            for (type = RotateNoneFlipNone; type <= Rotate270FlipX; type++)
+            {
+                winetest_push_context("format %#x, %s, type %u", formats[i],
+                                      bottom_up ? "bottom-up" : "top-down", type);
+
+                memset(bits, 0xcc, sizeof(bits));
+                stride = (src_width * bpp + 31) / 32 * 4;
+                scan0 = bits;
+                if (bottom_up)
+                {
+                    scan0 += stride * (src_height - 1);
+                    stride = -stride;
+                }
+                for (y = 0; y < src_height; y++)
+                    for (x = 0; x < src_width; x++)
+                        set_packed_pixel(scan0, stride, bpp, x, y, rotateflip_pattern(x, y));
+                memcpy(orig_bits, bits, sizeof(bits));
+
+                stat = GdipCreateBitmapFromScan0(src_width, src_height, stride, formats[i], scan0, &bitmap);
+                expect(Ok, stat);
+
+                if (formats[i] & PixelFormatIndexed)
+                {
+                    palette->Flags = 0;
+                    palette->Count = 1 << bpp;
+                    for (j = 0; j < palette->Count; j++)
+                        palette->Entries[j] = 0xff000000 | (j * 0x030507);
+                    stat = GdipSetImagePalette((GpImage *)bitmap, palette);
+                    expect(Ok, stat);
+                }
+
+                stat = GdipImageRotateFlip((GpImage *)bitmap, type);
+                expect(Ok, stat);
+
+                stat = GdipGetImageWidth((GpImage *)bitmap, &width);
+                expect(Ok, stat);
+                stat = GdipGetImageHeight((GpImage *)bitmap, &height);
+                expect(Ok, stat);
+                expect(type & 1 ? src_height : src_width, width);
+                expect(type & 1 ? src_width : src_height, height);
+
+                stat = GdipGetImagePixelFormat((GpImage *)bitmap, &format);
+                expect(Ok, stat);
+                expect(formats[i], format);
+
+                stat = GdipBitmapLockBits(bitmap, NULL, ImageLockModeRead, formats[i], &data);
+                expect(Ok, stat);
+                if (stat == Ok)
+                {
+                    wrong = 0;
+                    for (y = 0; y < src_height; y++)
+                        for (x = 0; x < src_width; x++)
+                        {
+                            new_x = x;
+                            new_y = y;
+                            rotateflip_point(type, src_width, src_height, &new_x, &new_y);
+                            if (get_packed_pixel(data.Scan0, data.Stride, bpp, new_x, new_y) !=
+                                (rotateflip_pattern(x, y) & mask))
+                                wrong++;
+                        }
+                    ok(!wrong || broken(bpp < 8), "%u pixels are wrong\n", wrong);
+
+                    stat = GdipBitmapUnlockBits(bitmap, &data);
+                    expect(Ok, stat);
+                }
+
+                if (formats[i] & PixelFormatIndexed)
+                {
+                    stat = GdipGetImagePalette((GpImage *)bitmap, new_palette, sizeof(new_palette_buf));
+                    expect(Ok, stat);
+                    expect(palette->Flags, new_palette->Flags);
+                    expect(palette->Count, new_palette->Count);
+                    ok(!memcmp(new_palette->Entries, palette->Entries, palette->Count * sizeof(ARGB)),
+                       "the palette was changed\n");
+                }
+
+                ok(!memcmp(bits, orig_bits, sizeof(bits)), "the source bits were modified\n");
+
+                GdipDisposeImage((GpImage *)bitmap);
+                winetest_pop_context();
+            }
+        }
+    }
+}
+
 static void test_remaptable(void)
 {
     GpStatus stat;
@@ -6609,6 +6778,7 @@ START_TEST(image)
     test_gamma();
     test_multiframegif();
     test_rotateflip();
+    test_rotateflip_formats();
     test_remaptable();
     test_colorkey();
     test_dispose();

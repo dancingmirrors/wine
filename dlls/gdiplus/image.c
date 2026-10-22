@@ -5782,8 +5782,14 @@ GpStatus WINGDIPAPI GdipImageRotateFlip(GpImage *image, RotateFlipType type)
         return ObjectBusy;
 
     rotate_90 = type&1;
-    flip_x = (type&6) == 2 || (type&6) == 4;
+    flip_x = (type&3) == 2 || (type&3) == 3;
     flip_y = (type&3) == 1 || (type&3) == 2;
+
+    if (type&4)
+    {
+        if (rotate_90) flip_y = !flip_y;
+        else flip_x = !flip_x;
+    }
 
     if (image->type != ImageTypeBitmap)
     {
@@ -5794,13 +5800,6 @@ GpStatus WINGDIPAPI GdipImageRotateFlip(GpImage *image, RotateFlipType type)
 
     bitmap = (GpBitmap*)image;
     bpp = PIXELFORMATBPP(bitmap->format);
-
-    if (bpp < 8)
-    {
-        FIXME("Not implemented for %i bit images\n", bpp);
-        image_unlock(image);
-        return NotImplemented;
-    }
 
     if (rotate_90)
     {
@@ -5826,40 +5825,83 @@ GpStatus WINGDIPAPI GdipImageRotateFlip(GpImage *image, RotateFlipType type)
             LPBYTE src_row, src_pixel;
             LPBYTE dst_row, dst_pixel;
 
-            src_origin = bitmap->bits;
-            if (flip_x) src_origin += bytesperpixel * (bitmap->width - 1);
-            if (flip_y) src_origin += bitmap->stride * (bitmap->height - 1);
-
-            if (rotate_90)
+            if (!rotate_90 && !flip_x)
             {
-                if (flip_y) src_x_offset = -bitmap->stride;
-                else src_x_offset = bitmap->stride;
-                if (flip_x) src_y_offset = -bytesperpixel;
-                else src_y_offset = bytesperpixel;
+                src_row = bitmap->bits;
+                if (flip_y) src_row += bitmap->stride * (bitmap->height - 1);
+                src_y_offset = flip_y ? -bitmap->stride : bitmap->stride;
+
+                dst_row = dst_lock.Scan0;
+                for (y=0; y<height; y++)
+                {
+                    memcpy(dst_row, src_row, (width * bpp + 7) / 8);
+                    src_row += src_y_offset;
+                    dst_row += dst_lock.Stride;
+                }
+            }
+            else if (bpp < 8)
+            {
+                BYTE index, mask = (1 << bpp) - 1;
+                INT src_x, src_y, bit;
+
+                dst_row = dst_lock.Scan0;
+                for (y=0; y<height; y++)
+                {
+                    for (x=0; x<width; x++)
+                    {
+                        src_x = rotate_90 ? y : x;
+                        src_y = rotate_90 ? x : y;
+                        if (flip_x) src_x = bitmap->width - 1 - src_x;
+                        if (flip_y) src_y = bitmap->height - 1 - src_y;
+
+                        src_row = bitmap->bits + bitmap->stride * src_y;
+                        bit = src_x * bpp;
+                        index = (src_row[bit / 8] >> (8 - bpp - bit % 8)) & mask;
+
+                        bit = x * bpp;
+                        dst_row[bit / 8] &= ~(mask << (8 - bpp - bit % 8));
+                        dst_row[bit / 8] |= index << (8 - bpp - bit % 8);
+                    }
+                    dst_row += dst_lock.Stride;
+                }
             }
             else
             {
-                if (flip_x) src_x_offset = -bytesperpixel;
-                else src_x_offset = bytesperpixel;
-                if (flip_y) src_y_offset = -bitmap->stride;
-                else src_y_offset = bitmap->stride;
-            }
+                src_origin = bitmap->bits;
+                if (flip_x) src_origin += bytesperpixel * (bitmap->width - 1);
+                if (flip_y) src_origin += bitmap->stride * (bitmap->height - 1);
 
-            src_row = src_origin;
-            dst_row = dst_lock.Scan0;
-            for (y=0; y<height; y++)
-            {
-                src_pixel = src_row;
-                dst_pixel = dst_row;
-                for (x=0; x<width; x++)
+                if (rotate_90)
                 {
-                    /* FIXME: This could probably be faster without memcpy. */
-                    memcpy(dst_pixel, src_pixel, bytesperpixel);
-                    dst_pixel += bytesperpixel;
-                    src_pixel += src_x_offset;
+                    if (flip_y) src_x_offset = -bitmap->stride;
+                    else src_x_offset = bitmap->stride;
+                    if (flip_x) src_y_offset = -bytesperpixel;
+                    else src_y_offset = bytesperpixel;
                 }
-                src_row += src_y_offset;
-                dst_row += dst_lock.Stride;
+                else
+                {
+                    if (flip_x) src_x_offset = -bytesperpixel;
+                    else src_x_offset = bytesperpixel;
+                    if (flip_y) src_y_offset = -bitmap->stride;
+                    else src_y_offset = bitmap->stride;
+                }
+
+                src_row = src_origin;
+                dst_row = dst_lock.Scan0;
+                for (y=0; y<height; y++)
+                {
+                    src_pixel = src_row;
+                    dst_pixel = dst_row;
+                    for (x=0; x<width; x++)
+                    {
+                        /* FIXME: This could probably be faster without memcpy. */
+                        memcpy(dst_pixel, src_pixel, bytesperpixel);
+                        dst_pixel += bytesperpixel;
+                        src_pixel += src_x_offset;
+                    }
+                    src_row += src_y_offset;
+                    dst_row += dst_lock.Stride;
+                }
             }
 
             GdipBitmapUnlockBits(new_bitmap, &dst_lock);
