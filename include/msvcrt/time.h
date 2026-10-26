@@ -55,7 +55,17 @@ struct timespec
     __msvcrt_long tv_nsec;
 };
 
-#ifdef __i386__
+#ifdef _UCRT
+#define _daylight (*__daylight())
+#define _dstbias (*__dstbias())
+#define _timezone (*__timezone())
+#define _tzname (__tzname())
+
+_ACRTIMP int *   __cdecl __daylight(void);
+_ACRTIMP __msvcrt_long *  __cdecl __dstbias(void);
+_ACRTIMP __msvcrt_long *  __cdecl __timezone(void);
+_ACRTIMP char ** __cdecl __tzname(void);
+#elif defined(__i386__)
 #define _daylight (*__p__daylight())
 #define _dstbias (*__p__dstbias())
 #define _timezone (*__p__timezone())
@@ -69,7 +79,7 @@ _ACRTIMP char ** __cdecl __p__tzname(void);
 extern int _daylight;
 extern __msvcrt_long _dstbias;
 extern __msvcrt_long _timezone;
-extern char *_tzname;
+extern char *_tzname[2];
 #endif
 
 #if !defined(_UCRT) && defined(_USE_32BIT_TIME_T)

@@ -1281,6 +1281,12 @@ static struct file *load_file( const char *name )
         parse_functions[i].parse( file, f );
         break;
     }
+    if (i == ARRAY_SIZE(parse_functions))
+    {
+        /* check for C++ header with no extension */
+        const char *dir = strstr( name, "/msvcrt/" );
+        if (dir && !strchr( dir, '.' )) parse_c_file( file, f );
+    }
 
     fclose( f );
     input_file_name = NULL;
@@ -3061,6 +3067,17 @@ static void output_source_nls( struct makefile *make, struct incl_file *source, 
 
 
 /*******************************************************************
+ *         output_source_dat
+ */
+static void output_source_dat( struct makefile *make, struct incl_file *source, const char *obj )
+{
+    add_install_rule( make, source->name, 0, source->name,
+                      strmake( "D$(datadir)/wine/nls/%s", source->name ));
+    output_srcdir_symlink( make, strmake( "%s.dat", obj ));
+}
+
+
+/*******************************************************************
  *         output_source_desktop
  */
 static void output_source_desktop( struct makefile *make, struct incl_file *source, const char *obj )
@@ -3429,6 +3446,7 @@ static const struct
     { "sfd", output_source_sfd },
     { "svg", output_source_svg },
     { "nls", output_source_nls },
+    { "dat", output_source_dat },
     { "desktop", output_source_desktop },
     { "po", output_source_po },
     { "in", output_source_in },
@@ -3957,13 +3975,20 @@ static void output_sources( struct makefile *make )
         char *obj = xstrdup( source->name );
         char *ext = get_extension( obj );
 
-        if (!ext) fatal_error( "unsupported file type %s\n", source->name );
-        *ext++ = 0;
+        if (ext)
+        {
+            *ext++ = 0;
 
-        for (j = 0; output_source_funcs[j].ext; j++)
-            if (!strcmp( ext, output_source_funcs[j].ext )) break;
+            for (j = 0; output_source_funcs[j].ext; j++)
+                if (!strcmp( ext, output_source_funcs[j].ext )) break;
 
-        output_source_funcs[j].fn( make, source, obj );
+            output_source_funcs[j].fn( make, source, obj );
+        }
+        else if (!strncmp( source->name, "msvcrt/", 7 ))  /* C++ header with no extension */
+            output_source_h( make, source, obj );
+        else
+            fatal_error( "unsupported file type %s\n", source->name );
+
         strarray_addall_uniq( &make->dependencies, source->dependencies );
     }
 

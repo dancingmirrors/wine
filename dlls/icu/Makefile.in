@@ -1,0 +1,6 @@
+MODULE    = icu.dll
+IMPORTLIB = icu
+IMPORTS   = $(ICUI18N_PE_LIBS) $(ICUCOMMON_PE_LIBS) $(ICUCXX_PE_LIBS) advapi32
+
+SOURCES = \
+	main.c

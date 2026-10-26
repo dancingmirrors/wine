@@ -284,19 +284,48 @@ static const union {
 #define FP_ILOGB0 (-0x7fffffff - _C2)
 #define FP_ILOGBNAN 0x7fffffff
 
+#define _FP_LT  1
+#define _FP_EQ  2
+#define _FP_GT  4
+
 _ACRTIMP short __cdecl _dtest(double*);
 _ACRTIMP short __cdecl _ldtest(long double*);
 _ACRTIMP short __cdecl _fdtest(float*);
 
 #ifdef __cplusplus
 
+_ACRTIMP int   __cdecl _dsign(double);
+_ACRTIMP int   __cdecl _ldsign(long double);
+_ACRTIMP int   __cdecl _fdsign(float);
+_ACRTIMP int   __cdecl _dpcomp(double, double);
+_ACRTIMP int   __cdecl _ldpcomp(long double, long double);
+_ACRTIMP int   __cdecl _fdpcomp(float, float);
+
+_ACRTIMP double __cdecl erfc(double);
+_ACRTIMP float __cdecl erfcf(float);
+_ACRTIMP double __cdecl nan(const char *);
+_ACRTIMP float __cdecl nanf(const char *);
+
 extern "C++" {
 inline int fpclassify(float x) throw() { return _fdtest(&x); }
 inline int fpclassify(double x) throw() { return _dtest(&x); }
 inline int fpclassify(long double x) throw() { return _ldtest(&x); }
+inline bool signbit(float x) throw() { return _fdsign(x) != 0; }
+inline bool signbit(double x) throw() { return _dsign(x) != 0; }
+inline bool signbit(long double x) throw() { return _ldsign(x) != 0; }
+inline int _fpcomp(float x, float y) throw() { return _fdpcomp(x, y); }
+inline int _fpcomp(double x, double y) throw() { return _dpcomp(x, y); }
+inline int _fpcomp(long double x, long double y) throw() { return _ldpcomp(x, y); }
 template <class T> inline bool isfinite(T x) throw() { return fpclassify(x) <= 0; }
 template <class T> inline bool isinf(T x) throw() { return fpclassify(x) == FP_INFINITE; }
 template <class T> inline bool isnan(T x) throw() { return fpclassify(x) == FP_NAN; }
+template <class T> inline bool isnormal(T x) throw() { return fpclassify(x) == FP_NORMAL; }
+template <class T1, class T2> inline bool isgreater(T1 x, T2 y) throw() { return (_fpcomp(x, y) & _FP_GT) != 0; }
+template <class T1, class T2> inline bool isgreaterequal(T1 x, T2 y) throw() { return (_fpcomp(x, y) & (_FP_EQ | _FP_GT)) != 0; }
+template <class T1, class T2> inline bool isless(T1 x, T2 y) throw() { return (_fpcomp(x, y) & _FP_LT) != 0; }
+template <class T1, class T2> inline bool islessequal(T1 x, T2 y) throw() { return (_fpcomp(x, y) & (_FP_LT | _FP_EQ)) != 0; }
+template <class T1, class T2> inline bool islessgreater(T1 x, T2 y) throw() { return (_fpcomp(x, y) & (_FP_LT | _FP_GT)) != 0; }
+template <class T1, class T2> inline bool isunordered(T1 x, T2 y) throw() { return _fpcomp(x, y) == 0; }
 } /* extern "C++" */
 
 #elif _MSVCR_VER >= 120
@@ -369,10 +398,7 @@ static inline int __signbit(double x)
  _ACRTIMP int __cdecl _dpcomp(double, double);
  _ACRTIMP int __cdecl _fdpcomp(float, float);
 
-#define _FP_LT  1
-#define _FP_EQ  2
-#define _FP_GT  4
-
+#ifndef __cplusplus  /* C++ gets the templates above */
 #if defined(__GNUC__) || defined(__clang__)
 # define isgreater(x, y)      __builtin_isgreater(x, y)
 # define isgreaterequal(x, y) __builtin_isgreaterequal(x, y)
@@ -389,6 +415,7 @@ static inline int __signbit(double x)
 # define islessgreater(x, y)  ((__FP_COMPARE(x, y) & (_FP_LT|_FP_GT)) != 0)
 # define isunordered(x, y)    (!__FP_COMPARE(x, y))
 #endif
+#endif /* __cplusplus */
 
 #endif /* _UCRT */
 
@@ -426,6 +453,82 @@ static inline double y1( double x ) { return _y1( x ); }
 static inline double yn( int n, double x ) { return _yn( n, x ); }
 
 static inline float hypotf( float x, float y ) { return _hypotf( x, y ); }
-static inline long double atan2l( long double x, long double y ) { return atan2( (double)y, (double)x ); }
+static inline long double atan2l( long double y, long double x ) { return atan2( (double)y, (double)x ); }
+
+#ifdef __cplusplus
+
+typedef float float_t;
+typedef double double_t;
+
+#if !defined(__SIZEOF_LONG_DOUBLE__) || __SIZEOF_LONG_DOUBLE__ == 8
+
+extern "C" {
+
+_ACRTIMP float __cdecl nexttowardf(float, long double);
+_ACRTIMP double __cdecl nexttoward(double, long double);
+_ACRTIMP long double __cdecl nexttowardl(long double, long double);
+
+_ACRTIMP long double __cdecl acoshl(long double);
+_ACRTIMP long double __cdecl asinhl(long double);
+_ACRTIMP long double __cdecl atanhl(long double);
+_ACRTIMP long double __cdecl cbrtl(long double);
+_ACRTIMP long double __cdecl copysignl(long double, long double);
+_ACRTIMP long double __cdecl coshl(long double);
+_ACRTIMP long double __cdecl erfcl(long double);
+_ACRTIMP long double __cdecl erfl(long double);
+_ACRTIMP long double __cdecl exp2l(long double);
+_ACRTIMP long double __cdecl expm1l(long double);
+_ACRTIMP long double __cdecl fdiml(long double, long double);
+_ACRTIMP long double __cdecl fmal(long double, long double, long double);
+_ACRTIMP long double __cdecl fmaxl(long double, long double);
+_ACRTIMP long double __cdecl fminl(long double, long double);
+_ACRTIMP int __cdecl ilogbl(long double);
+_ACRTIMP long double __cdecl lgammal(long double);
+_ACRTIMP __int64 __cdecl llrintl(long double);
+_ACRTIMP __int64 __cdecl llroundl(long double);
+_ACRTIMP __msvcrt_long __cdecl lrintl(long double);
+_ACRTIMP __msvcrt_long __cdecl lroundl(long double);
+_ACRTIMP long double __cdecl log1pl(long double);
+_ACRTIMP long double __cdecl log2l(long double);
+_ACRTIMP long double __cdecl logbl(long double);
+_ACRTIMP long double __cdecl nanl(const char *);
+_ACRTIMP long double __cdecl nearbyintl(long double);
+_ACRTIMP long double __cdecl nextafterl(long double, long double);
+_ACRTIMP long double __cdecl remainderl(long double, long double);
+_ACRTIMP long double __cdecl remquol(long double, long double, int *);
+_ACRTIMP long double __cdecl rintl(long double);
+_ACRTIMP long double __cdecl roundl(long double);
+_ACRTIMP long double __cdecl scalblnl(long double, __msvcrt_long);
+_ACRTIMP long double __cdecl scalbnl(long double, int);
+_ACRTIMP long double __cdecl tgammal(long double);
+_ACRTIMP long double __cdecl truncl(long double);
+
+static inline long double acosl(long double x) { return acos(x); }
+static inline long double asinl(long double x) { return asin(x); }
+static inline long double atanl(long double x) { return atan(x); }
+static inline long double ceill(long double x) { return ceil(x); }
+static inline long double cosl(long double x) { return cos(x); }
+static inline long double expl(long double x) { return exp(x); }
+static inline long double fabsl(long double x) { return fabs(x); }
+static inline long double floorl(long double x) { return floor(x); }
+static inline long double fmodl(long double x, long double y) { return fmod(x, y); }
+static inline long double frexpl(long double x, int *y) { return frexp(x, y); }
+static inline long double hypotl(long double x, long double y) { return _hypot(x, y); }
+static inline long double ldexpl(long double x, int y) { return ldexp(x, y); }
+static inline long double log10l(long double x) { return log10(x); }
+static inline long double logl(long double x) { return log(x); }
+static inline long double modfl(long double x, long double *y) { return modf(x, (double *)y); }
+static inline long double powl(long double x, long double y) { return pow(x, y); }
+static inline long double sinhl(long double x) { return sinh(x); }
+static inline long double sinl(long double x) { return sin(x); }
+static inline long double sqrtl(long double x) { return sqrt(x); }
+static inline long double tanhl(long double x) { return tanh(x); }
+static inline long double tanl(long double x) { return tan(x); }
+
+}
+
+#endif /* __SIZEOF_LONG_DOUBLE__ == 8 */
+
+#endif /* __cplusplus */
 
 #endif /* __WINE_MATH_H */

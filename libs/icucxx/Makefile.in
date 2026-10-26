@@ -1,0 +1,17 @@
+EXTLIB    = libicucxx.a
+EXTRAINCL = -I$(srcdir)/c++/src -I$(srcdir)/c++abi/include
+EXTRADEFS = -D_LIBCPP_BUILDING_LIBRARY= -D_LIBCPP_ENABLE_CXX17_REMOVED_UNEXPECTED_FUNCTIONS \
+	-D_LIBCXXABI_DISABLE_VISIBILITY_ANNOTATIONS -DWINE_UNICODE_NATIVE -fno-exceptions -fno-threadsafe-statics \
+	-Wno-ignored-attributes
+
+SOURCES = \
+	c++/src/chrono.cpp \
+	c++/src/condition_variable.cpp \
+	c++/src/mutex.cpp \
+	c++/src/support/win32/thread_win32.cpp \
+	c++abi/src/abort_message.cpp \
+	c++abi/src/cxa_virtual.cpp \
+	c++abi/src/private_typeinfo.cpp \
+	c++abi/src/stdlib_exception.cpp \
+	c++abi/src/stdlib_typeinfo.cpp \
+	runtime.cpp

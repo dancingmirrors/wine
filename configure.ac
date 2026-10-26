@@ -222,7 +222,7 @@ case "$host_cpu" in
   x86_64)          HOST_ARCH=x86_64 ;;
 esac
 m4_set_add_all([_AC_SUBST_VARS],[HOST_ARCH]m4_foreach([cpu],[aarch64,arm,arm64ec,i386,x86_64],
-                                [m4_foreach([var],[CC,CFLAGS,EXTRACFLAGS,LDFLAGS,DEBUG,TARGET,STRIP,DELAYLOADFLAG,DISABLED_SUBDIRS],[,cpu[_]var])]))
+                                [m4_foreach([var],[CC,CXX,CFLAGS,CXXFLAGS,EXTRACFLAGS,LDFLAGS,DEBUG,TARGET,STRIP,DELAYLOADFLAG,DISABLED_SUBDIRS],[,cpu[_]var])]))
 
 AC_CACHE_CHECK([for the directory containing the Wine tools], wine_cv_toolsdir,
   [wine_cv_toolsdir="$with_wine_tools"
@@ -847,9 +847,12 @@ AS_VAR_SET_IF([enable_archs],
      fi])
 
 saved_CC=$CC
+saved_CXX=$CXX
 saved_CFLAGS=$CFLAGS
 saved_CPPFLAGS=$CPPFLAGS
+saved_CXXFLAGS=$CXXFLAGS
 saved_LDFLAGS=$LDFLAGS
+wine_cxx_pe_archs=""
 
 AS_UNSET(extra_arch)
 for arch in $cross_archs
@@ -890,8 +893,12 @@ do
     CPPFLAGS=""
     AS_VAR_SET_IF([${wine_arch}_CFLAGS],[],[AS_VAR_SET([${wine_arch}_CFLAGS],[${CROSSCFLAGS:-"-g -O2"}])])
     AS_VAR_SET_IF([${wine_arch}_LDFLAGS],[],[AS_VAR_SET([${wine_arch}_LDFLAGS],[$CROSSLDFLAGS])])
+    AS_VAR_SET_IF([${wine_arch}_CXX],[],[AS_VAR_COPY([${wine_arch}_CXX],[${wine_arch}_CC])])
+    AS_VAR_SET_IF([${wine_arch}_CXXFLAGS],[],[AS_VAR_COPY([${wine_arch}_CXXFLAGS],[${wine_arch}_CFLAGS])])
     AS_VAR_COPY([CC],[${wine_arch}_CC])
+    AS_VAR_COPY([CXX],[${wine_arch}_CXX])
     AS_VAR_COPY([CFLAGS],[${wine_arch}_CFLAGS])
+    AS_VAR_COPY([CXXFLAGS],[${wine_arch}_CXXFLAGS])
     AS_VAR_COPY([LDFLAGS],[${wine_arch}_LDFLAGS])
     AS_VAR_SET([${wine_arch}_EXTRACFLAGS],["-D__WINE_PE_BUILD -Wall"])
 
@@ -938,6 +945,7 @@ do
         AS_VAR_APPEND([${wine_arch}_EXTRACFLAGS],[" $llvm_extra_cflags"])
         AS_VAR_APPEND([${wine_arch}_LDFLAGS],[" $llvm_extra_ldflags"])
         CFLAGS="$CFLAGS $llvm_extra_cflags $llvm_cflags"
+        CXXFLAGS="$CXXFLAGS $llvm_extra_cflags"
     else
         AS_VAR_PUSHDEF([wine_cv_crosscc], [wine_cv_${wine_arch}_crosscc])
         AC_CACHE_CHECK([whether $CC works], wine_cv_crosscc,
@@ -997,6 +1005,62 @@ This is an error since --enable-archs=$wine_arch was requested.])])
                           continue])])
 
     AS_VAR_IF([wine_arch],[$extra_arch],[],[AS_VAR_APPEND([PE_ARCHS],[" $wine_arch"])])
+
+    dnl C++ is only used by the bundled ICU, which needs C++17
+    AS_VAR_PUSHDEF([wine_cv_crosscxx_cxx17],[ac_cv_${wine_arch}_crosscxx_cxx17])
+    AC_MSG_CHECKING([for $CXX option to enable C++17 features])
+    AC_LANG_PUSH([C++])
+    AC_CACHE_VAL([wine_cv_crosscxx_cxx17],
+        [AS_VAR_SET([wine_cv_crosscxx_cxx17],[no])
+         for arg in '' '-std=gnu++17'
+         do
+             test -z "$arg" || CXX="$CXX $arg"
+             AC_COMPILE_IFELSE([AC_LANG_SOURCE([[#if __cplusplus < 201703L
+#error C++17 is required
+#endif
+template <class T> constexpr bool wine_is_int = false;
+template <> constexpr bool wine_is_int<int> = true;
+int wine_test(void) { if constexpr (wine_is_int<int>) return 0; else return 1; }]])],
+                               [AS_VAR_SET([wine_cv_crosscxx_cxx17],[$arg])],
+                               [AS_VAR_SET([wine_cv_crosscxx_cxx17],[no])])
+             AS_VAR_COPY([CXX],[${wine_arch}_CXX])
+             AS_VAR_IF([wine_cv_crosscxx_cxx17],[no],[],[break])
+         done])
+    AS_VAR_COPY([res],[wine_cv_crosscxx_cxx17])
+    AS_VAR_POPDEF([wine_cv_crosscxx_cxx17])
+    case "x$res" in
+      x) AC_MSG_RESULT([none needed]) ;;
+      xno) AC_MSG_RESULT([unsupported]) ;;
+      x*) AC_MSG_RESULT([$res])
+          AS_VAR_APPEND([${wine_arch}_CXX],[" $res"]) ;;
+    esac
+    AS_VAR_IF([res],[no],[],
+        [dnl Wine's C runtime treats long double as double
+         AS_VAR_COPY([CXX],[${wine_arch}_CXX])
+         AS_VAR_PUSHDEF([wine_cv_crosscxx_ld64],[ac_cv_${wine_arch}_crosscxx_ld64])
+         AC_MSG_CHECKING([for $CXX option to make long double 64-bit])
+         AC_CACHE_VAL([wine_cv_crosscxx_ld64],
+             [AS_VAR_SET([wine_cv_crosscxx_ld64],[no])
+              for arg in '' '-mlong-double-64'
+              do
+                  test -z "$arg" || CXX="$CXX $arg"
+                  AC_COMPILE_IFELSE([AC_LANG_SOURCE([[static_assert(sizeof(long double) == sizeof(double), "long double");]])],
+                                    [AS_VAR_SET([wine_cv_crosscxx_ld64],[$arg])])
+                  AS_VAR_COPY([CXX],[${wine_arch}_CXX])
+                  AS_VAR_IF([wine_cv_crosscxx_ld64],[no],[],[break])
+              done])
+         AS_VAR_COPY([res],[wine_cv_crosscxx_ld64])
+         AS_VAR_POPDEF([wine_cv_crosscxx_ld64])
+         case "x$res" in
+           x) AC_MSG_RESULT([none needed]) ;;
+           xno) AC_MSG_RESULT([unsupported]) ;;
+           x*) AC_MSG_RESULT([$res])
+               AS_VAR_APPEND([${wine_arch}_CXX],[" $res"]) ;;
+         esac
+         AS_VAR_COPY([CXX],[${wine_arch}_CXX])
+         AS_VAR_IF([res],[no],[],
+             [AS_VAR_IF([wine_arch],[$extra_arch],[],[AS_VAR_APPEND([wine_cxx_pe_archs],[" $wine_arch"])])])])
+    AC_LANG_POP([C++])
 
     WINE_TRY_PE_CFLAGS([-fno-strict-aliasing])
     dnl clang needs to be told to fail on unknown options
@@ -1079,9 +1143,31 @@ This is an error since --enable-archs=$wine_arch was requested.])])
 done
 
 CC=$saved_CC
+CXX=$saved_CXX
 CFLAGS=$saved_CFLAGS
 CPPFLAGS=$saved_CPPFLAGS
+CXXFLAGS=$saved_CXXFLAGS
 LDFLAGS=$saved_LDFLAGS
+
+dnl The bundled ICU is C++, build it only where a C++17 PE compiler was found
+dnl (any new C++ module needs to be added to the list below)
+if test -z "$PE_ARCHS" -o "x$wine_cxx_pe_archs" != "x$PE_ARCHS"
+then
+    if test -n "$wine_cxx_pe_archs"
+    then
+        wine_cxx_enable=`echo $wine_cxx_pe_archs | sed 's/ /,/g'`
+        WINE_WARNING([no C++17 PE compiler for some architectures, ICU will only be built for $wine_cxx_enable.])
+    else
+        wine_cxx_enable=no
+        test -z "$PE_ARCHS" || WINE_WARNING([no C++17 PE compiler found, ICU won't be built.])
+    fi
+    enable_icu=${enable_icu:-$wine_cxx_enable}
+    enable_icuin=${enable_icuin:-$wine_cxx_enable}
+    enable_icuuc=${enable_icuuc:-$wine_cxx_enable}
+    enable_icucommon=${enable_icucommon:-$wine_cxx_enable}
+    enable_icucxx=${enable_icucxx:-$wine_cxx_enable}
+    enable_icui18n=${enable_icui18n:-$wine_cxx_enable}
+fi
 
 case $HOST_ARCH in
   arm|aarch64)
@@ -1227,6 +1313,9 @@ WINE_EXTLIB_FLAGS(CAPSTONE, capstone, capstone, "-I\$(top_srcdir)/libs/capstone/
 WINE_EXTLIB_FLAGS(FAUDIO, faudio, "faudio mfplat mfreadwrite mfuuid propsys", "-I\$(top_srcdir)/libs/faudio/include")
 WINE_EXTLIB_FLAGS(FLUIDSYNTH, fluidsynth, "fluidsynth", "-I\$(top_srcdir)/libs/fluidsynth/include")
 WINE_EXTLIB_FLAGS(GSM, gsm, gsm, "-I\$(top_srcdir)/libs/gsm/inc")
+WINE_EXTLIB_FLAGS(ICUCOMMON, icucommon, icucommon, "-I\$(top_srcdir)/libs/icucommon")
+WINE_EXTLIB_FLAGS(ICUCXX, icucxx, "icucxx vcruntime140")
+WINE_EXTLIB_FLAGS(ICUI18N, icui18n, icui18n, "-I\$(top_srcdir)/libs/icui18n")
 WINE_EXTLIB_FLAGS(JPEG, jpeg, jpeg, "-I\$(top_srcdir)/libs/jpeg")
 WINE_EXTLIB_FLAGS(JXR, jxr, jxr, "-I\$(top_srcdir)/libs/jxr/jxrgluelib -I\$(top_srcdir)/libs/jxr/image/sys")
 WINE_EXTLIB_FLAGS(LCMS2, lcms2, lcms2, "-I\$(top_srcdir)/libs/lcms2/include")
@@ -2792,6 +2881,10 @@ WINE_CONFIG_MAKEFILE(dlls/iccvid)
 WINE_CONFIG_MAKEFILE(dlls/icmp)
 WINE_CONFIG_MAKEFILE(dlls/icmui)
 WINE_CONFIG_MAKEFILE(dlls/icmui/tests)
+WINE_CONFIG_MAKEFILE(dlls/icu)
+WINE_CONFIG_MAKEFILE(dlls/icu/tests)
+WINE_CONFIG_MAKEFILE(dlls/icuin)
+WINE_CONFIG_MAKEFILE(dlls/icuuc)
 WINE_CONFIG_MAKEFILE(dlls/ieframe)
 WINE_CONFIG_MAKEFILE(dlls/ieframe/tests)
 WINE_CONFIG_MAKEFILE(dlls/ieproxy)
@@ -3494,6 +3587,9 @@ WINE_CONFIG_MAKEFILE(libs/dxguid)
 WINE_CONFIG_MAKEFILE(libs/faudio)
 WINE_CONFIG_MAKEFILE(libs/fluidsynth)
 WINE_CONFIG_MAKEFILE(libs/gsm)
+WINE_CONFIG_MAKEFILE(libs/icucommon)
+WINE_CONFIG_MAKEFILE(libs/icucxx)
+WINE_CONFIG_MAKEFILE(libs/icui18n)
 WINE_CONFIG_MAKEFILE(libs/jpeg)
 WINE_CONFIG_MAKEFILE(libs/jxr)
 WINE_CONFIG_MAKEFILE(libs/lcms2)

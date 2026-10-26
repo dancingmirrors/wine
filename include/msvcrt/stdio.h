@@ -180,6 +180,26 @@ static inline int __cdecl _vsnprintf(char *buffer, size_t size, const char *form
     return ret < 0 ? -1 : ret;
 }
 
+static inline int __cdecl _vsnprintf_l(char *buffer, size_t size, const char *format, _locale_t locale, va_list args) __WINE_CRT_PRINTF_ATTR(3, 0);
+static inline int __cdecl _vsnprintf_l(char *buffer, size_t size, const char *format, _locale_t locale, va_list args)
+{
+    int ret = __stdio_common_vsprintf(_CRT_INTERNAL_LOCAL_PRINTF_OPTIONS | _CRT_INTERNAL_PRINTF_LEGACY_VSPRINTF_NULL_TERMINATION,
+                                      buffer, size, format, locale, args);
+    return ret < 0 ? -1 : ret;
+}
+
+static inline int __cdecl _snprintf_l(char *buffer, size_t size, const char *format, _locale_t locale, ...) __WINE_CRT_PRINTF_ATTR(3, 5);
+static inline int __cdecl _snprintf_l(char *buffer, size_t size, const char *format, _locale_t locale, ...)
+{
+    int ret;
+    va_list args;
+
+    va_start(args, locale);
+    ret = _vsnprintf_l(buffer, size, format, locale, args);
+    va_end(args);
+    return ret;
+}
+
 static inline int __cdecl _vsnprintf_s(char *buffer, size_t size, size_t count, const char *format, va_list args) __WINE_CRT_PRINTF_ATTR(4, 0);
 static inline int __cdecl _vsnprintf_s(char *buffer, size_t size, size_t count, const char *format, va_list args)
 {
@@ -435,6 +455,24 @@ static inline int __cdecl scanf_s(const char *format, ...)
     return ret;
 }
 
+static inline int __cdecl vsscanf(const char *buffer, const char *format, va_list args) __WINE_CRT_SCANF_ATTR(2, 0);
+static inline int __cdecl vsscanf(const char *buffer, const char *format, va_list args)
+{
+    return __stdio_common_vsscanf(_CRT_INTERNAL_LOCAL_SCANF_OPTIONS, buffer, -1, format, NULL, args);
+}
+
+static inline int __cdecl vfscanf(FILE *file, const char *format, va_list args) __WINE_CRT_SCANF_ATTR(2, 0);
+static inline int __cdecl vfscanf(FILE *file, const char *format, va_list args)
+{
+    return __stdio_common_vfscanf(_CRT_INTERNAL_LOCAL_SCANF_OPTIONS, file, format, NULL, args);
+}
+
+static inline int __cdecl vscanf(const char *format, va_list args) __WINE_CRT_SCANF_ATTR(1, 0);
+static inline int __cdecl vscanf(const char *format, va_list args)
+{
+    return __stdio_common_vfscanf(_CRT_INTERNAL_LOCAL_SCANF_OPTIONS, stdin, format, NULL, args);
+}
+
 #else /* _UCRT && !_NO_CRT_STDIO_INLINE */
 
 _ACRTIMP int __cdecl _scprintf(const char *,...) __WINE_CRT_PRINTF_ATTR(1, 2);
@@ -455,6 +493,8 @@ _ACRTIMP int __cdecl vsprintf(char*,const char*,va_list) __WINE_CRT_PRINTF_ATTR(
 _ACRTIMP int __cdecl vsprintf_s(char*,size_t,const char*,va_list) __WINE_CRT_PRINTF_ATTR(3, 0);
 
 _ACRTIMP int __cdecl _vsnprintf(char*,size_t,const char*,va_list) __WINE_CRT_PRINTF_ATTR(3, 0);
+_ACRTIMP int __cdecl _vsnprintf_l(char*,size_t,const char*,_locale_t,va_list) __WINE_CRT_PRINTF_ATTR(3, 0);
+_ACRTIMP int __cdecl _snprintf_l(char*,size_t,const char*,_locale_t,...) __WINE_CRT_PRINTF_ATTR(3, 5);
 static inline int vsnprintf(char *buffer, size_t size, const char *format, va_list args) __WINE_CRT_PRINTF_ATTR(3, 0);
 static inline int vsnprintf(char *buffer, size_t size, const char *format, va_list args)
 { return _vsnprintf(buffer,size,format,args); }
@@ -467,6 +507,9 @@ _ACRTIMP int __cdecl scanf(const char*,...) __WINE_CRT_SCANF_ATTR(1, 2);
 _ACRTIMP int __cdecl scanf_s(const char*,...) __WINE_CRT_SCANF_ATTR(1, 2);
 _ACRTIMP int __cdecl sscanf(const char*,const char*,...) __WINE_CRT_SCANF_ATTR(2, 3);
 _ACRTIMP int __cdecl sscanf_s(const char*,const char*,...) __WINE_CRT_SCANF_ATTR(2, 3);
+_ACRTIMP int __cdecl vscanf(const char *format, va_list args) __WINE_CRT_SCANF_ATTR(1, 0);
+_ACRTIMP int __cdecl vfscanf(FILE *file, const char *format, va_list args) __WINE_CRT_SCANF_ATTR(2, 0);
+_ACRTIMP int __cdecl vsscanf(const char*, const char*, va_list) __WINE_CRT_SCANF_ATTR(2, 0);
 
 #endif /* _UCRT && !_NO_CRT_STDIO_INLINE */
 

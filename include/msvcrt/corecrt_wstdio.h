@@ -358,6 +358,21 @@ static inline int __cdecl wscanf_s(FILE *file, const wchar_t *format, ...)
     return ret;
 }
 
+static inline int __cdecl vswscanf(const wchar_t *buffer, const wchar_t *format, va_list args)
+{
+    return __stdio_common_vswscanf(_CRT_INTERNAL_LOCAL_SCANF_OPTIONS, buffer, -1, format, NULL, args);
+}
+
+static inline int __cdecl vfwscanf(FILE *file, const wchar_t *format, va_list args)
+{
+    return __stdio_common_vfwscanf(_CRT_INTERNAL_LOCAL_SCANF_OPTIONS, file, format, NULL, args);
+}
+
+static inline int __cdecl vwscanf(const wchar_t *format, va_list args)
+{
+    return __stdio_common_vfwscanf(_CRT_INTERNAL_LOCAL_SCANF_OPTIONS, stdin, format, NULL, args);
+}
+
 #else /* _UCRT && !_NO_CRT_STDIO_INLINE */
 
 _ACRTIMP int __cdecl _scwprintf(const wchar_t*,...);
@@ -403,6 +418,9 @@ _ACRTIMP int __cdecl fwscanf(FILE*,const wchar_t*,...);
 _ACRTIMP int __cdecl fwscanf_s(FILE*,const wchar_t*,...);
 _ACRTIMP int __cdecl swscanf(const wchar_t*,const wchar_t*,...);
 _ACRTIMP int __cdecl swscanf_s(const wchar_t*,const wchar_t*,...);
+_ACRTIMP int __cdecl vfwscanf(FILE*,const wchar_t*,va_list);
+_ACRTIMP int __cdecl vswscanf(const wchar_t*,const wchar_t*,va_list);
+_ACRTIMP int __cdecl vwscanf(const wchar_t*,va_list);
 _ACRTIMP int __cdecl wscanf(const wchar_t*,...);
 _ACRTIMP int __cdecl wscanf_s(const wchar_t*,...);
 
