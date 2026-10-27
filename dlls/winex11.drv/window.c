@@ -373,6 +373,11 @@ static BOOL is_actual_window_rect_mapped(const struct x11drv_win_data *data)
     return is_window_rect_mapped(&rect);
 }
 
+static BOOL is_window_rect_shown( const struct x11drv_win_data *data, const RECT *rect )
+{
+    return data->embedded || is_window_rect_mapped( rect );
+}
+
 
 /***********************************************************************
  *              alloc_win_data
@@ -1641,7 +1646,7 @@ static UINT window_update_client_config( struct x11drv_win_data *data )
     else if (IsRectEmpty( &rect )) flags |= SWP_NOSIZE;
 
     /* don't sync win32 position for offscreen windows */
-    if ((data->is_offscreen = !is_window_rect_mapped( &new_rect ))) flags |= SWP_NOMOVE;
+    if ((data->is_offscreen = !is_window_rect_shown( data, &new_rect ))) flags |= SWP_NOMOVE;
 
     if ((flags & (SWP_NOSIZE | SWP_NOMOVE)) == (SWP_NOSIZE | SWP_NOMOVE)) return 0;
 
@@ -3306,7 +3311,7 @@ void X11DRV_WindowPosChanged( HWND hwnd, HWND insert_after, HWND owner_hint, UIN
     if (old_style & WS_VISIBLE)
     {
         if (((swp_flags & SWP_HIDEWINDOW) && !(new_style & WS_VISIBLE)) ||
-            (!(new_style & WS_MINIMIZE) && !is_window_rect_mapped( &new_rects->window ) && is_window_rect_mapped( &old_rects.window ) &
+            (!(new_style & WS_MINIMIZE) && !is_window_rect_shown( data, &new_rects->window ) && is_window_rect_mapped( &old_rects.window ) &
             !is_actual_window_rect_mapped( data )))
         {
             release_win_data( data );
@@ -3337,7 +3342,7 @@ void X11DRV_WindowPosChanged( HWND hwnd, HWND insert_after, HWND owner_hint, UIN
     }
 
     if ((new_style & WS_VISIBLE) &&
-        ((new_style & WS_MINIMIZE) || is_window_rect_mapped( &new_rects->window )))
+        ((new_style & WS_MINIMIZE) || is_window_rect_shown( data, &new_rects->window )))
     {
         if (!(old_style & WS_VISIBLE))
         {
@@ -3500,7 +3505,7 @@ void X11DRV_SetLayeredWindowAttributes( HWND hwnd, COLORREF key, BYTE alpha, DWO
             DWORD style = NtUserGetWindowLongW( data->hwnd, GWL_STYLE );
 
             if ((style & WS_VISIBLE) &&
-                ((style & WS_MINIMIZE) || is_window_rect_mapped( &data->rects.window )))
+                ((style & WS_MINIMIZE) || is_window_rect_shown( data, &data->rects.window )))
             {
                 release_win_data( data );
                 map_window( hwnd, style );
@@ -3528,10 +3533,11 @@ void X11DRV_SetLayeredWindowAttributes( HWND hwnd, COLORREF key, BYTE alpha, DWO
 void X11DRV_UpdateLayeredWindow( HWND hwnd, UINT flags )
 {
     struct x11drv_win_data *data;
-    BOOL mapped;
+    BOOL mapped, shown;
 
     if (!(data = get_win_data( hwnd ))) return;
     mapped = data->desired_state.wm_state != WithdrawnState;
+    shown = is_window_rect_shown( data, &data->rects.window );
     release_win_data( data );
 
     /* layered windows are mapped only once their attributes are set */
@@ -3539,7 +3545,7 @@ void X11DRV_UpdateLayeredWindow( HWND hwnd, UINT flags )
     {
         DWORD style = NtUserGetWindowLongW( hwnd, GWL_STYLE );
 
-        if ((style & WS_VISIBLE) && ((style & WS_MINIMIZE) || is_window_rect_mapped( &data->rects.window )))
+        if ((style & WS_VISIBLE) && ((style & WS_MINIMIZE) || shown))
             map_window( hwnd, style );
     }
 }
