@@ -1005,7 +1005,11 @@ static VkResult win32u_vkAllocateMemory( VkDevice client_device, const VkMemoryA
         case VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO:
             export_info = (VkExportMemoryAllocateInfo *)*next;
             if (!(export_info->handleTypes & EXTERNAL_MEMORY_WIN32_BITS))
-                FIXME( "Unsupported handle types %#x\n", export_info->handleTypes );
+            {
+                if (export_info->handleTypes) FIXME( "Unsupported handle types %#x\n", export_info->handleTypes );
+                export_info->handleTypes = 0;
+                export_info = NULL;
+            }
             else
             {
                 nt_shared = !(export_info->handleTypes & (VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_KMT_BIT |
@@ -1022,6 +1026,7 @@ static VkResult win32u_vkAllocateMemory( VkDevice client_device, const VkMemoryA
             break;
         case VK_STRUCTURE_TYPE_IMPORT_MEMORY_WIN32_HANDLE_INFO_KHR:
             import_win32 = (VkImportMemoryWin32HandleInfoKHR *)*next;
+            if (!import_win32->handleType) import_win32 = NULL; /* not an import operation */
             *next = (*next)->pNext; next = &prev;
             break;
         case VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO: break;
@@ -3028,7 +3033,11 @@ static VkResult win32u_vkCreateSemaphore( VkDevice client_device, const VkSemaph
         case VK_STRUCTURE_TYPE_EXPORT_SEMAPHORE_CREATE_INFO:
             export_info = (VkExportSemaphoreCreateInfoKHR *)*next;
             if (!(export_info->handleTypes & EXTERNAL_SEMAPHORE_WIN32_BITS))
-                FIXME( "Unsupported handle types %#x\n", export_info->handleTypes );
+            {
+                if (export_info->handleTypes) FIXME( "Unsupported handle types %#x\n", export_info->handleTypes );
+                export_info->handleTypes = 0;
+                export_info = NULL;
+            }
             else
             {
                 nt_shared = !(export_info->handleTypes & VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32_KMT_BIT);
@@ -3282,7 +3291,11 @@ static VkResult win32u_vkCreateFence( VkDevice client_device, const VkFenceCreat
         case VK_STRUCTURE_TYPE_EXPORT_FENCE_CREATE_INFO:
             export_info = (VkExportFenceCreateInfoKHR *)*next;
             if (!(export_info->handleTypes & EXTERNAL_FENCE_WIN32_BITS))
-                FIXME( "Unsupported handle types %#x\n", export_info->handleTypes );
+            {
+                if (export_info->handleTypes) FIXME( "Unsupported handle types %#x\n", export_info->handleTypes );
+                export_info->handleTypes = 0;
+                export_info = NULL;
+            }
             else
             {
                 nt_shared = !(export_info->handleTypes & VK_EXTERNAL_FENCE_HANDLE_TYPE_OPAQUE_WIN32_KMT_BIT);
