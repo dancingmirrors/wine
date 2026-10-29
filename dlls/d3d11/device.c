@@ -3974,9 +3974,14 @@ static HRESULT STDMETHODCALLTYPE d3d11_device_CreateBuffer(ID3D11Device2 *iface,
     if (FAILED(hr = d3d_buffer_create(device, desc, data, &object)))
         return hr;
 
-    *buffer = &object->ID3D11Buffer_iface;
+    if (buffer)
+    {
+        *buffer = &object->ID3D11Buffer_iface;
+        return S_OK;
+    }
 
-    return S_OK;
+    ID3D11Buffer_Release(&object->ID3D11Buffer_iface);
+    return S_FALSE;
 }
 
 static HRESULT STDMETHODCALLTYPE d3d11_device_CreateTexture1D(ID3D11Device2 *iface,
@@ -3991,9 +3996,14 @@ static HRESULT STDMETHODCALLTYPE d3d11_device_CreateTexture1D(ID3D11Device2 *ifa
     if (FAILED(hr = d3d_texture1d_create(device, desc, data, &object)))
         return hr;
 
-    *texture = &object->ID3D11Texture1D_iface;
+    if (texture)
+    {
+        *texture = &object->ID3D11Texture1D_iface;
+        return S_OK;
+    }
 
-    return S_OK;
+    ID3D11Texture1D_Release(&object->ID3D11Texture1D_iface);
+    return S_FALSE;
 }
 
 static HRESULT STDMETHODCALLTYPE d3d11_device_CreateTexture2D(ID3D11Device2 *iface,
@@ -4014,9 +4024,14 @@ static HRESULT STDMETHODCALLTYPE d3d11_device_CreateTexture2D(ID3D11Device2 *ifa
     if (FAILED(hr = d3d_texture2d_create(device, desc, NULL, data, &object)))
         return hr;
 
-    *texture = &object->ID3D11Texture2D_iface;
+    if (texture)
+    {
+        *texture = &object->ID3D11Texture2D_iface;
+        return S_OK;
+    }
 
-    return S_OK;
+    ID3D11Texture2D_Release(&object->ID3D11Texture2D_iface);
+    return S_FALSE;
 }
 
 static HRESULT STDMETHODCALLTYPE d3d11_device_CreateTexture3D(ID3D11Device2 *iface,
@@ -4031,9 +4046,14 @@ static HRESULT STDMETHODCALLTYPE d3d11_device_CreateTexture3D(ID3D11Device2 *ifa
     if (FAILED(hr = d3d_texture3d_create(device, desc, data, &object)))
         return hr;
 
-    *texture = &object->ID3D11Texture3D_iface;
+    if (texture)
+    {
+        *texture = &object->ID3D11Texture3D_iface;
+        return S_OK;
+    }
 
-    return S_OK;
+    ID3D11Texture3D_Release(&object->ID3D11Texture3D_iface);
+    return S_FALSE;
 }
 
 static HRESULT STDMETHODCALLTYPE d3d11_device_CreateShaderResourceView(ID3D11Device2 *iface,
@@ -4045,7 +4065,8 @@ static HRESULT STDMETHODCALLTYPE d3d11_device_CreateShaderResourceView(ID3D11Dev
 
     TRACE("iface %p, resource %p, desc %p, view %p.\n", iface, resource, desc, view);
 
-    *view = NULL;
+    if (view)
+        *view = NULL;
 
     if (!resource)
         return E_INVALIDARG;
@@ -4053,9 +4074,14 @@ static HRESULT STDMETHODCALLTYPE d3d11_device_CreateShaderResourceView(ID3D11Dev
     if (FAILED(hr = d3d_shader_resource_view_create(device, resource, desc, &object)))
         return hr;
 
-    *view = &object->ID3D11ShaderResourceView_iface;
+    if (view)
+    {
+        *view = &object->ID3D11ShaderResourceView_iface;
+        return S_OK;
+    }
 
-    return S_OK;
+    ID3D11ShaderResourceView_Release(&object->ID3D11ShaderResourceView_iface);
+    return S_FALSE;
 }
 
 static HRESULT STDMETHODCALLTYPE d3d11_device_CreateUnorderedAccessView(ID3D11Device2 *iface,
@@ -4067,14 +4093,20 @@ static HRESULT STDMETHODCALLTYPE d3d11_device_CreateUnorderedAccessView(ID3D11De
 
     TRACE("iface %p, resource %p, desc %p, view %p.\n", iface, resource, desc, view);
 
-    *view = NULL;
+    if (view)
+        *view = NULL;
 
     if (FAILED(hr = d3d11_unordered_access_view_create(device, resource, desc, &object)))
         return hr;
 
-    *view = &object->ID3D11UnorderedAccessView_iface;
+    if (view)
+    {
+        *view = &object->ID3D11UnorderedAccessView_iface;
+        return S_OK;
+    }
 
-    return S_OK;
+    ID3D11UnorderedAccessView_Release(&object->ID3D11UnorderedAccessView_iface);
+    return S_FALSE;
 }
 
 static HRESULT STDMETHODCALLTYPE d3d11_device_CreateRenderTargetView(ID3D11Device2 *iface,
@@ -4086,7 +4118,8 @@ static HRESULT STDMETHODCALLTYPE d3d11_device_CreateRenderTargetView(ID3D11Devic
 
     TRACE("iface %p, resource %p, desc %p, view %p.\n", iface, resource, desc, view);
 
-    *view = NULL;
+    if (view)
+        *view = NULL;
 
     if (!resource)
         return E_INVALIDARG;
@@ -4094,9 +4127,14 @@ static HRESULT STDMETHODCALLTYPE d3d11_device_CreateRenderTargetView(ID3D11Devic
     if (FAILED(hr = d3d_rendertarget_view_create(device, resource, desc, &object)))
         return hr;
 
-    *view = &object->ID3D11RenderTargetView_iface;
+    if (view)
+    {
+        *view = &object->ID3D11RenderTargetView_iface;
+        return S_OK;
+    }
 
-    return S_OK;
+    ID3D11RenderTargetView_Release(&object->ID3D11RenderTargetView_iface);
+    return S_FALSE;
 }
 
 static HRESULT STDMETHODCALLTYPE d3d11_device_CreateDepthStencilView(ID3D11Device2 *iface,
@@ -4108,14 +4146,20 @@ static HRESULT STDMETHODCALLTYPE d3d11_device_CreateDepthStencilView(ID3D11Devic
 
     TRACE("iface %p, resource %p, desc %p, view %p.\n", iface, resource, desc, view);
 
-    *view = NULL;
+    if (view)
+        *view = NULL;
 
     if (FAILED(hr = d3d_depthstencil_view_create(device, resource, desc, &object)))
         return hr;
 
-    *view = &object->ID3D11DepthStencilView_iface;
+    if (view)
+    {
+        *view = &object->ID3D11DepthStencilView_iface;
+        return S_OK;
+    }
 
-    return S_OK;
+    ID3D11DepthStencilView_Release(&object->ID3D11DepthStencilView_iface);
+    return S_FALSE;
 }
 
 static HRESULT STDMETHODCALLTYPE d3d11_device_CreateInputLayout(ID3D11Device2 *iface,
@@ -4134,9 +4178,14 @@ static HRESULT STDMETHODCALLTYPE d3d11_device_CreateInputLayout(ID3D11Device2 *i
             shader_byte_code, shader_byte_code_length, &object)))
         return hr;
 
-    *input_layout = &object->ID3D11InputLayout_iface;
+    if (input_layout)
+    {
+        *input_layout = &object->ID3D11InputLayout_iface;
+        return S_OK;
+    }
 
-    return S_OK;
+    ID3D11InputLayout_Release(&object->ID3D11InputLayout_iface);
+    return S_FALSE;
 }
 
 static HRESULT STDMETHODCALLTYPE d3d11_device_CreateVertexShader(ID3D11Device2 *iface, const void *byte_code,
@@ -4149,7 +4198,8 @@ static HRESULT STDMETHODCALLTYPE d3d11_device_CreateVertexShader(ID3D11Device2 *
     TRACE("iface %p, byte_code %p, byte_code_length %Iu, class_linkage %p, shader %p.\n",
             iface, byte_code, byte_code_length, class_linkage, shader);
 
-    *shader = NULL;
+    if (shader)
+        *shader = NULL;
 
     if (class_linkage)
         FIXME("Class linkage is not implemented yet.\n");
@@ -4157,9 +4207,14 @@ static HRESULT STDMETHODCALLTYPE d3d11_device_CreateVertexShader(ID3D11Device2 *
     if (FAILED(hr = d3d_vertex_shader_create(device, byte_code, byte_code_length, &object)))
         return hr;
 
-    *shader = &object->ID3D11VertexShader_iface;
+    if (shader)
+    {
+        *shader = &object->ID3D11VertexShader_iface;
+        return S_OK;
+    }
 
-    return S_OK;
+    ID3D11VertexShader_Release(&object->ID3D11VertexShader_iface);
+    return S_FALSE;
 }
 
 static HRESULT STDMETHODCALLTYPE d3d11_device_CreateGeometryShader(ID3D11Device2 *iface, const void *byte_code,
@@ -4172,7 +4227,8 @@ static HRESULT STDMETHODCALLTYPE d3d11_device_CreateGeometryShader(ID3D11Device2
     TRACE("iface %p, byte_code %p, byte_code_length %Iu, class_linkage %p, shader %p.\n",
             iface, byte_code, byte_code_length, class_linkage, shader);
 
-    *shader = NULL;
+    if (shader)
+        *shader = NULL;
 
     if (class_linkage)
         FIXME("Class linkage is not implemented yet.\n");
@@ -4181,9 +4237,14 @@ static HRESULT STDMETHODCALLTYPE d3d11_device_CreateGeometryShader(ID3D11Device2
             NULL, 0, NULL, 0, 0, &object)))
         return hr;
 
-    *shader = &object->ID3D11GeometryShader_iface;
+    if (shader)
+    {
+        *shader = &object->ID3D11GeometryShader_iface;
+        return S_OK;
+    }
 
-    return S_OK;
+    ID3D11GeometryShader_Release(&object->ID3D11GeometryShader_iface);
+    return S_FALSE;
 }
 
 static HRESULT STDMETHODCALLTYPE d3d11_device_CreateGeometryShaderWithStreamOutput(ID3D11Device2 *iface,
@@ -4200,7 +4261,8 @@ static HRESULT STDMETHODCALLTYPE d3d11_device_CreateGeometryShaderWithStreamOutp
             iface, byte_code, byte_code_length, so_entries, entry_count, buffer_strides, strides_count,
             rasterizer_stream, class_linkage, shader);
 
-    *shader = NULL;
+    if (shader)
+        *shader = NULL;
 
     if (class_linkage)
         FIXME("Class linkage is not implemented yet.\n");
@@ -4211,9 +4273,14 @@ static HRESULT STDMETHODCALLTYPE d3d11_device_CreateGeometryShaderWithStreamOutp
         return hr;
     }
 
-    *shader = &object->ID3D11GeometryShader_iface;
+    if (shader)
+    {
+        *shader = &object->ID3D11GeometryShader_iface;
+        return hr;
+    }
 
-    return hr;
+    ID3D11GeometryShader_Release(&object->ID3D11GeometryShader_iface);
+    return S_FALSE;
 }
 
 static HRESULT STDMETHODCALLTYPE d3d11_device_CreatePixelShader(ID3D11Device2 *iface, const void *byte_code,
@@ -4226,7 +4293,8 @@ static HRESULT STDMETHODCALLTYPE d3d11_device_CreatePixelShader(ID3D11Device2 *i
     TRACE("iface %p, byte_code %p, byte_code_length %Iu, class_linkage %p, shader %p.\n",
             iface, byte_code, byte_code_length, class_linkage, shader);
 
-    *shader = NULL;
+    if (shader)
+        *shader = NULL;
 
     if (class_linkage)
         FIXME("Class linkage is not implemented yet.\n");
@@ -4234,9 +4302,14 @@ static HRESULT STDMETHODCALLTYPE d3d11_device_CreatePixelShader(ID3D11Device2 *i
     if (FAILED(hr = d3d_pixel_shader_create(device, byte_code, byte_code_length, &object)))
         return hr;
 
-    *shader = &object->ID3D11PixelShader_iface;
+    if (shader)
+    {
+        *shader = &object->ID3D11PixelShader_iface;
+        return S_OK;
+    }
 
-    return S_OK;
+    ID3D11PixelShader_Release(&object->ID3D11PixelShader_iface);
+    return S_FALSE;
 }
 
 static HRESULT STDMETHODCALLTYPE d3d11_device_CreateHullShader(ID3D11Device2 *iface, const void *byte_code,
@@ -4249,7 +4322,8 @@ static HRESULT STDMETHODCALLTYPE d3d11_device_CreateHullShader(ID3D11Device2 *if
     TRACE("iface %p, byte_code %p, byte_code_length %Iu, class_linkage %p, shader %p.\n",
             iface, byte_code, byte_code_length, class_linkage, shader);
 
-    *shader = NULL;
+    if (shader)
+        *shader = NULL;
 
     if (class_linkage)
         FIXME("Class linkage is not implemented yet.\n");
@@ -4257,9 +4331,14 @@ static HRESULT STDMETHODCALLTYPE d3d11_device_CreateHullShader(ID3D11Device2 *if
     if (FAILED(hr = d3d11_hull_shader_create(device, byte_code, byte_code_length, &object)))
         return hr;
 
-    *shader = &object->ID3D11HullShader_iface;
+    if (shader)
+    {
+        *shader = &object->ID3D11HullShader_iface;
+        return S_OK;
+    }
 
-    return S_OK;
+    ID3D11HullShader_Release(&object->ID3D11HullShader_iface);
+    return S_FALSE;
 }
 
 static HRESULT STDMETHODCALLTYPE d3d11_device_CreateDomainShader(ID3D11Device2 *iface, const void *byte_code,
@@ -4272,7 +4351,8 @@ static HRESULT STDMETHODCALLTYPE d3d11_device_CreateDomainShader(ID3D11Device2 *
     TRACE("iface %p, byte_code %p, byte_code_length %Iu, class_linkage %p, shader %p.\n",
             iface, byte_code, byte_code_length, class_linkage, shader);
 
-    *shader = NULL;
+    if (shader)
+        *shader = NULL;
 
     if (class_linkage)
         FIXME("Class linkage is not implemented yet.\n");
@@ -4280,9 +4360,14 @@ static HRESULT STDMETHODCALLTYPE d3d11_device_CreateDomainShader(ID3D11Device2 *
     if (FAILED(hr = d3d11_domain_shader_create(device, byte_code, byte_code_length, &object)))
         return hr;
 
-    *shader = &object->ID3D11DomainShader_iface;
+    if (shader)
+    {
+        *shader = &object->ID3D11DomainShader_iface;
+        return S_OK;
+    }
 
-    return S_OK;
+    ID3D11DomainShader_Release(&object->ID3D11DomainShader_iface);
+    return S_FALSE;
 }
 
 static HRESULT STDMETHODCALLTYPE d3d11_device_CreateComputeShader(ID3D11Device2 *iface, const void *byte_code,
@@ -4295,7 +4380,8 @@ static HRESULT STDMETHODCALLTYPE d3d11_device_CreateComputeShader(ID3D11Device2 
     TRACE("iface %p, byte_code %p, byte_code_length %Iu, class_linkage %p, shader %p.\n",
             iface, byte_code, byte_code_length, class_linkage, shader);
 
-    *shader = NULL;
+    if (shader)
+        *shader = NULL;
 
     if (class_linkage)
         FIXME("Class linkage is not implemented yet.\n");
@@ -4303,9 +4389,14 @@ static HRESULT STDMETHODCALLTYPE d3d11_device_CreateComputeShader(ID3D11Device2 
     if (FAILED(hr = d3d11_compute_shader_create(device, byte_code, byte_code_length, &object)))
         return hr;
 
-    *shader = &object->ID3D11ComputeShader_iface;
+    if (shader)
+    {
+        *shader = &object->ID3D11ComputeShader_iface;
+        return S_OK;
+    }
 
-    return S_OK;
+    ID3D11ComputeShader_Release(&object->ID3D11ComputeShader_iface);
+    return S_FALSE;
 }
 
 static HRESULT STDMETHODCALLTYPE d3d11_device_CreateClassLinkage(ID3D11Device2 *iface,
@@ -4337,9 +4428,14 @@ static HRESULT STDMETHODCALLTYPE d3d11_device_CreateBlendState1(ID3D11Device2 *i
     if (FAILED(hr = d3d_blend_state_create(device, desc, &object)))
         return hr;
 
-    *state = &object->ID3D11BlendState1_iface;
+    if (state)
+    {
+        *state = &object->ID3D11BlendState1_iface;
+        return S_OK;
+    }
 
-    return S_OK;
+    ID3D11BlendState1_Release(&object->ID3D11BlendState1_iface);
+    return S_FALSE;
 }
 
 static HRESULT STDMETHODCALLTYPE d3d11_device_CreateBlendState(ID3D11Device2 *iface,
@@ -4384,9 +4480,14 @@ static HRESULT STDMETHODCALLTYPE d3d11_device_CreateDepthStencilState(ID3D11Devi
     if (FAILED(hr = d3d_depthstencil_state_create(device, desc, &object)))
         return hr;
 
-    *depth_stencil_state = &object->ID3D11DepthStencilState_iface;
+    if (depth_stencil_state)
+    {
+        *depth_stencil_state = &object->ID3D11DepthStencilState_iface;
+        return S_OK;
+    }
 
-    return S_OK;
+    ID3D11DepthStencilState_Release(&object->ID3D11DepthStencilState_iface);
+    return S_FALSE;
 }
 
 static HRESULT STDMETHODCALLTYPE d3d11_device_CreateRasterizerState(ID3D11Device2 *iface,
@@ -4408,9 +4509,14 @@ static HRESULT STDMETHODCALLTYPE d3d11_device_CreateRasterizerState(ID3D11Device
     if (FAILED(hr = d3d_rasterizer_state_create(device, &desc1, &object)))
         return hr;
 
-    *rasterizer_state = (ID3D11RasterizerState *)&object->ID3D11RasterizerState1_iface;
+    if (rasterizer_state)
+    {
+        *rasterizer_state = (ID3D11RasterizerState *)&object->ID3D11RasterizerState1_iface;
+        return S_OK;
+    }
 
-    return S_OK;
+    ID3D11RasterizerState1_Release(&object->ID3D11RasterizerState1_iface);
+    return S_FALSE;
 }
 
 static HRESULT STDMETHODCALLTYPE d3d11_device_CreateSamplerState(ID3D11Device2 *iface,
@@ -4425,9 +4531,14 @@ static HRESULT STDMETHODCALLTYPE d3d11_device_CreateSamplerState(ID3D11Device2 *
     if (FAILED(hr = d3d_sampler_state_create(device, desc, &object)))
         return hr;
 
-    *sampler_state = &object->ID3D11SamplerState_iface;
+    if (sampler_state)
+    {
+        *sampler_state = &object->ID3D11SamplerState_iface;
+        return S_OK;
+    }
 
-    return S_OK;
+    ID3D11SamplerState_Release(&object->ID3D11SamplerState_iface);
+    return S_FALSE;
 }
 
 static HRESULT STDMETHODCALLTYPE d3d11_device_CreateQuery(ID3D11Device2 *iface,
@@ -5109,9 +5220,14 @@ static HRESULT STDMETHODCALLTYPE d3d11_device_CreateRasterizerState1(ID3D11Devic
     if (FAILED(hr = d3d_rasterizer_state_create(device, desc, &object)))
         return hr;
 
-    *state = &object->ID3D11RasterizerState1_iface;
+    if (state)
+    {
+        *state = &object->ID3D11RasterizerState1_iface;
+        return S_OK;
+    }
 
-    return S_OK;
+    ID3D11RasterizerState1_Release(&object->ID3D11RasterizerState1_iface);
+    return S_FALSE;
 }
 
 static HRESULT STDMETHODCALLTYPE d3d11_device_CreateDeviceContextState(ID3D11Device2 *iface, UINT flags,
@@ -6725,9 +6841,14 @@ static HRESULT STDMETHODCALLTYPE d3d10_device_CreateBuffer(ID3D10Device1 *iface,
     if (FAILED(hr = d3d_buffer_create(device, &d3d11_desc, (const D3D11_SUBRESOURCE_DATA *)data, &object)))
         return hr;
 
-    *buffer = &object->ID3D10Buffer_iface;
+    if (buffer)
+    {
+        *buffer = &object->ID3D10Buffer_iface;
+        return S_OK;
+    }
 
-    return S_OK;
+    ID3D10Buffer_Release(&object->ID3D10Buffer_iface);
+    return S_FALSE;
 }
 
 static HRESULT STDMETHODCALLTYPE d3d10_device_CreateTexture1D(ID3D10Device1 *iface,
@@ -6752,9 +6873,14 @@ static HRESULT STDMETHODCALLTYPE d3d10_device_CreateTexture1D(ID3D10Device1 *ifa
     if (FAILED(hr = d3d_texture1d_create(device, &d3d11_desc, (const D3D11_SUBRESOURCE_DATA *)data, &object)))
         return hr;
 
-    *texture = &object->ID3D10Texture1D_iface;
+    if (texture)
+    {
+        *texture = &object->ID3D10Texture1D_iface;
+        return S_OK;
+    }
 
-    return S_OK;
+    ID3D10Texture1D_Release(&object->ID3D10Texture1D_iface);
+    return S_FALSE;
 }
 
 static HRESULT STDMETHODCALLTYPE d3d10_device_CreateTexture2D(ID3D10Device1 *iface,
@@ -6782,9 +6908,14 @@ static HRESULT STDMETHODCALLTYPE d3d10_device_CreateTexture2D(ID3D10Device1 *ifa
     if (FAILED(hr = d3d_texture2d_create(device, &d3d11_desc, NULL, (const D3D11_SUBRESOURCE_DATA *)data, &object)))
         return hr;
 
-    *texture = &object->ID3D10Texture2D_iface;
+    if (texture)
+    {
+        *texture = &object->ID3D10Texture2D_iface;
+        return S_OK;
+    }
 
-    return S_OK;
+    ID3D10Texture2D_Release(&object->ID3D10Texture2D_iface);
+    return S_FALSE;
 }
 
 static HRESULT STDMETHODCALLTYPE d3d10_device_CreateTexture3D(ID3D10Device1 *iface,
@@ -6811,9 +6942,14 @@ static HRESULT STDMETHODCALLTYPE d3d10_device_CreateTexture3D(ID3D10Device1 *ifa
     if (FAILED(hr = d3d_texture3d_create(device, &d3d11_desc, (const D3D11_SUBRESOURCE_DATA *)data, &object)))
         return hr;
 
-    *texture = &object->ID3D10Texture3D_iface;
+    if (texture)
+    {
+        *texture = &object->ID3D10Texture3D_iface;
+        return S_OK;
+    }
 
-    return S_OK;
+    ID3D10Texture3D_Release(&object->ID3D10Texture3D_iface);
+    return S_FALSE;
 }
 
 static HRESULT STDMETHODCALLTYPE d3d10_device_CreateShaderResourceView1(ID3D10Device1 *iface,
@@ -6826,7 +6962,8 @@ static HRESULT STDMETHODCALLTYPE d3d10_device_CreateShaderResourceView1(ID3D10De
 
     TRACE("iface %p, resource %p, desc %p, view %p.\n", iface, resource, desc, view);
 
-    *view = NULL;
+    if (view)
+        *view = NULL;
 
     if (!resource)
         return E_INVALIDARG;
@@ -6843,9 +6980,14 @@ static HRESULT STDMETHODCALLTYPE d3d10_device_CreateShaderResourceView1(ID3D10De
     if (FAILED(hr))
         return hr;
 
-    *view = &object->ID3D10ShaderResourceView1_iface;
+    if (view)
+    {
+        *view = &object->ID3D10ShaderResourceView1_iface;
+        return S_OK;
+    }
 
-    return S_OK;
+    ID3D10ShaderResourceView1_Release(&object->ID3D10ShaderResourceView1_iface);
+    return S_FALSE;
 }
 
 static HRESULT STDMETHODCALLTYPE d3d10_device_CreateShaderResourceView(ID3D10Device1 *iface,
@@ -6867,7 +7009,8 @@ static HRESULT STDMETHODCALLTYPE d3d10_device_CreateRenderTargetView(ID3D10Devic
 
     TRACE("iface %p, resource %p, desc %p, view %p.\n", iface, resource, desc, view);
 
-    *view = NULL;
+    if (view)
+        *view = NULL;
 
     if (!resource)
         return E_INVALIDARG;
@@ -6883,9 +7026,14 @@ static HRESULT STDMETHODCALLTYPE d3d10_device_CreateRenderTargetView(ID3D10Devic
     if (FAILED(hr))
         return hr;
 
-    *view = &object->ID3D10RenderTargetView_iface;
+    if (view)
+    {
+        *view = &object->ID3D10RenderTargetView_iface;
+        return S_OK;
+    }
 
-    return S_OK;
+    ID3D10RenderTargetView_Release(&object->ID3D10RenderTargetView_iface);
+    return S_FALSE;
 }
 
 static D3D11_DSV_DIMENSION d3d11_dsv_dimension_from_d3d10(D3D10_DSV_DIMENSION dim)
@@ -6904,7 +7052,8 @@ static HRESULT STDMETHODCALLTYPE d3d10_device_CreateDepthStencilView(ID3D10Devic
 
     TRACE("iface %p, resource %p, desc %p, view %p.\n", iface, resource, desc, view);
 
-    *view = NULL;
+    if (view)
+        *view = NULL;
 
     if (desc)
     {
@@ -6925,9 +7074,14 @@ static HRESULT STDMETHODCALLTYPE d3d10_device_CreateDepthStencilView(ID3D10Devic
     if (FAILED(hr))
         return hr;
 
-    *view = &object->ID3D10DepthStencilView_iface;
+    if (view)
+    {
+        *view = &object->ID3D10DepthStencilView_iface;
+        return S_OK;
+    }
 
-    return S_OK;
+    ID3D10DepthStencilView_Release(&object->ID3D10DepthStencilView_iface);
+    return S_FALSE;
 }
 
 static HRESULT STDMETHODCALLTYPE d3d10_device_CreateInputLayout(ID3D10Device1 *iface,
@@ -6948,9 +7102,14 @@ static HRESULT STDMETHODCALLTYPE d3d10_device_CreateInputLayout(ID3D10Device1 *i
             shader_byte_code, shader_byte_code_length, &object)))
         return hr;
 
-    *input_layout = &object->ID3D10InputLayout_iface;
+    if (input_layout)
+    {
+        *input_layout = &object->ID3D10InputLayout_iface;
+        return S_OK;
+    }
 
-    return S_OK;
+    ID3D10InputLayout_Release(&object->ID3D10InputLayout_iface);
+    return S_FALSE;
 }
 
 static HRESULT STDMETHODCALLTYPE d3d10_device_CreateVertexShader(ID3D10Device1 *iface,
@@ -6963,14 +7122,20 @@ static HRESULT STDMETHODCALLTYPE d3d10_device_CreateVertexShader(ID3D10Device1 *
     TRACE("iface %p, byte_code %p, byte_code_length %Iu, shader %p.\n",
             iface, byte_code, byte_code_length, shader);
 
-    *shader = NULL;
+    if (shader)
+        *shader = NULL;
 
     if (FAILED(hr = d3d_vertex_shader_create(device, byte_code, byte_code_length, &object)))
         return hr;
 
-    *shader = &object->ID3D10VertexShader_iface;
+    if (shader)
+    {
+        *shader = &object->ID3D10VertexShader_iface;
+        return S_OK;
+    }
 
-    return S_OK;
+    ID3D10VertexShader_Release(&object->ID3D10VertexShader_iface);
+    return S_FALSE;
 }
 
 static HRESULT STDMETHODCALLTYPE d3d10_device_CreateGeometryShader(ID3D10Device1 *iface,
@@ -6983,15 +7148,21 @@ static HRESULT STDMETHODCALLTYPE d3d10_device_CreateGeometryShader(ID3D10Device1
     TRACE("iface %p, byte_code %p, byte_code_length %Iu, shader %p.\n",
             iface, byte_code, byte_code_length, shader);
 
-    *shader = NULL;
+    if (shader)
+        *shader = NULL;
 
     if (FAILED(hr = d3d_geometry_shader_create(device, byte_code, byte_code_length,
             NULL, 0, NULL, 0, 0, &object)))
         return hr;
 
-    *shader = &object->ID3D10GeometryShader_iface;
+    if (shader)
+    {
+        *shader = &object->ID3D10GeometryShader_iface;
+        return S_OK;
+    }
 
-    return S_OK;
+    ID3D10GeometryShader_Release(&object->ID3D10GeometryShader_iface);
+    return S_FALSE;
 }
 
 static HRESULT STDMETHODCALLTYPE d3d10_device_CreateGeometryShaderWithStreamOutput(ID3D10Device1 *iface,
@@ -7009,7 +7180,8 @@ static HRESULT STDMETHODCALLTYPE d3d10_device_CreateGeometryShaderWithStreamOutp
             iface, byte_code, byte_code_length, output_stream_decls,
             output_stream_decl_count, output_stream_stride, shader);
 
-    *shader = NULL;
+    if (shader)
+        *shader = NULL;
 
     if (!output_stream_decl_count && output_stream_stride)
     {
@@ -7051,9 +7223,14 @@ static HRESULT STDMETHODCALLTYPE d3d10_device_CreateGeometryShaderWithStreamOutp
     if (FAILED(hr))
         return hr;
 
-    *shader = &object->ID3D10GeometryShader_iface;
+    if (shader)
+    {
+        *shader = &object->ID3D10GeometryShader_iface;
+        return hr;
+    }
 
-    return hr;
+    ID3D10GeometryShader_Release(&object->ID3D10GeometryShader_iface);
+    return S_FALSE;
 }
 
 static HRESULT STDMETHODCALLTYPE d3d10_device_CreatePixelShader(ID3D10Device1 *iface,
@@ -7066,14 +7243,20 @@ static HRESULT STDMETHODCALLTYPE d3d10_device_CreatePixelShader(ID3D10Device1 *i
     TRACE("iface %p, byte_code %p, byte_code_length %Iu, shader %p.\n",
             iface, byte_code, byte_code_length, shader);
 
-    *shader = NULL;
+    if (shader)
+        *shader = NULL;
 
     if (FAILED(hr = d3d_pixel_shader_create(device, byte_code, byte_code_length, &object)))
         return hr;
 
-    *shader = &object->ID3D10PixelShader_iface;
+    if (shader)
+    {
+        *shader = &object->ID3D10PixelShader_iface;
+        return S_OK;
+    }
 
-    return S_OK;
+    ID3D10PixelShader_Release(&object->ID3D10PixelShader_iface);
+    return S_FALSE;
 }
 
 static HRESULT STDMETHODCALLTYPE d3d10_device_CreateBlendState1(ID3D10Device1 *iface,
@@ -7088,8 +7271,14 @@ static HRESULT STDMETHODCALLTYPE d3d10_device_CreateBlendState1(ID3D10Device1 *i
     if (FAILED(hr = d3d11_device_CreateBlendState(&device->ID3D11Device2_iface, (const D3D11_BLEND_DESC *)desc, &object)))
         return hr;
 
-    *blend_state = &impl_from_ID3D11BlendState1((ID3D11BlendState1 *)object)->ID3D10BlendState1_iface;
-    return S_OK;
+    if (blend_state)
+    {
+        *blend_state = &impl_from_ID3D11BlendState1((ID3D11BlendState1 *)object)->ID3D10BlendState1_iface;
+        return S_OK;
+    }
+
+    ID3D11BlendState_Release(object);
+    return S_FALSE;
 }
 
 static HRESULT STDMETHODCALLTYPE d3d10_device_CreateBlendState(ID3D10Device1 *iface,
@@ -7139,9 +7328,14 @@ static HRESULT STDMETHODCALLTYPE d3d10_device_CreateDepthStencilState(ID3D10Devi
     if (FAILED(hr = d3d_depthstencil_state_create(device, (const D3D11_DEPTH_STENCIL_DESC *)desc, &object)))
         return hr;
 
-    *depth_stencil_state = &object->ID3D10DepthStencilState_iface;
+    if (depth_stencil_state)
+    {
+        *depth_stencil_state = &object->ID3D10DepthStencilState_iface;
+        return S_OK;
+    }
 
-    return S_OK;
+    ID3D10DepthStencilState_Release(&object->ID3D10DepthStencilState_iface);
+    return S_FALSE;
 }
 
 static HRESULT STDMETHODCALLTYPE d3d10_device_CreateRasterizerState(ID3D10Device1 *iface,
@@ -7163,9 +7357,14 @@ static HRESULT STDMETHODCALLTYPE d3d10_device_CreateRasterizerState(ID3D10Device
     if (FAILED(hr = d3d_rasterizer_state_create(device, &desc1, &object)))
         return hr;
 
-    *rasterizer_state = &object->ID3D10RasterizerState_iface;
+    if (rasterizer_state)
+    {
+        *rasterizer_state = &object->ID3D10RasterizerState_iface;
+        return S_OK;
+    }
 
-    return S_OK;
+    ID3D10RasterizerState_Release(&object->ID3D10RasterizerState_iface);
+    return S_FALSE;
 }
 
 static HRESULT STDMETHODCALLTYPE d3d10_device_CreateSamplerState(ID3D10Device1 *iface,
@@ -7180,9 +7379,14 @@ static HRESULT STDMETHODCALLTYPE d3d10_device_CreateSamplerState(ID3D10Device1 *
     if (FAILED(hr = d3d_sampler_state_create(device, (const D3D11_SAMPLER_DESC *)desc, &object)))
         return hr;
 
-    *sampler_state = &object->ID3D10SamplerState_iface;
+    if (sampler_state)
+    {
+        *sampler_state = &object->ID3D10SamplerState_iface;
+        return S_OK;
+    }
 
-    return S_OK;
+    ID3D10SamplerState_Release(&object->ID3D10SamplerState_iface);
+    return S_FALSE;
 }
 
 static HRESULT STDMETHODCALLTYPE d3d10_device_CreateQuery(ID3D10Device1 *iface,

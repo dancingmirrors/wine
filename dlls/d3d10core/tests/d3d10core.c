@@ -1793,6 +1793,14 @@ static void test_create_texture1d(void)
 
     hr = ID3D10Device_CreateTexture1D(device, &desc, &data, &texture);
     ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+    hr = ID3D10Device_CreateTexture1D(device, &desc, &data, NULL);
+    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+
+    expected_refcount = get_refcount(device);
+    hr = ID3D10Device_CreateTexture1D(device, &desc, NULL, NULL);
+    ok(hr == S_FALSE, "Got unexpected hr %#lx.\n", hr);
+    refcount = get_refcount(device);
+    ok(refcount == expected_refcount, "Got unexpected refcount %lu, expected %lu.\n", refcount, expected_refcount);
 
     expected_refcount = get_refcount(device) + 1;
     hr = ID3D10Device_CreateTexture1D(device, &desc, NULL, &texture);
@@ -2103,6 +2111,14 @@ static void test_create_texture2d(void)
 
     hr = ID3D10Device_CreateTexture2D(device, &desc, &data, &texture);
     ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+    hr = ID3D10Device_CreateTexture2D(device, &desc, &data, NULL);
+    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+
+    expected_refcount = get_refcount(device);
+    hr = ID3D10Device_CreateTexture2D(device, &desc, NULL, NULL);
+    ok(hr == S_FALSE, "Got unexpected hr %#lx.\n", hr);
+    refcount = get_refcount(device);
+    ok(refcount == expected_refcount, "Got unexpected refcount %lu, expected %lu.\n", refcount, expected_refcount);
 
     expected_refcount = get_refcount(device) + 1;
     hr = ID3D10Device_CreateTexture2D(device, &desc, NULL, &texture);
@@ -2378,6 +2394,14 @@ static void test_create_texture3d(void)
 
     hr = ID3D10Device_CreateTexture3D(device, &desc, &data, &texture);
     ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+    hr = ID3D10Device_CreateTexture3D(device, &desc, &data, NULL);
+    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+
+    expected_refcount = get_refcount(device);
+    hr = ID3D10Device_CreateTexture3D(device, &desc, NULL, NULL);
+    ok(hr == S_FALSE, "Got unexpected hr %#lx.\n", hr);
+    refcount = get_refcount(device);
+    ok(refcount == expected_refcount, "Got unexpected refcount %lu, expected %lu.\n", refcount, expected_refcount);
 
     expected_refcount = get_refcount(device) + 1;
     hr = ID3D10Device_CreateTexture3D(device, &desc, NULL, &texture);
@@ -2443,13 +2467,13 @@ static void test_create_texture3d(void)
 
 static void test_create_buffer(void)
 {
+    ULONG refcount, expected_refcount;
     ID3D11Buffer *d3d11_buffer;
     HRESULT expected_hr, hr;
     D3D10_BUFFER_DESC desc;
     ID3D10Buffer *buffer;
     ID3D10Device *device;
     unsigned int i;
-    ULONG refcount;
 
     static const struct test
     {
@@ -2575,6 +2599,13 @@ static void test_create_buffer(void)
         ok(hr == expected_hr, "Got unexpected hr %#lx for constant buffer size %u.\n", hr, i);
         if (SUCCEEDED(hr))
             ID3D10Buffer_Release(buffer);
+
+        expected_refcount = get_refcount(device);
+        hr = ID3D10Device_CreateBuffer(device, &desc, NULL, NULL);
+        ok(hr == (expected_hr == S_OK ? S_FALSE : expected_hr),
+                "Got unexpected hr %#lx for constant buffer size %u.\n", hr, i);
+        refcount = get_refcount(device);
+        ok(refcount == expected_refcount, "Got unexpected refcount %lu, expected %lu.\n", refcount, expected_refcount);
     }
 
     refcount = ID3D10Device_Release(device);
@@ -2701,6 +2732,12 @@ static void test_create_depthstencil_view(void)
     hr = ID3D10Device_CreateTexture2D(device, &texture_desc, NULL, &texture);
     ok(SUCCEEDED(hr), "Failed to create a 2d texture, hr %#lx.\n", hr);
 
+    expected_refcount = get_refcount(device);
+    hr = ID3D10Device_CreateDepthStencilView(device, (ID3D10Resource *)texture, NULL, NULL);
+    ok(hr == S_FALSE, "Got unexpected hr %#lx.\n", hr);
+    refcount = get_refcount(device);
+    ok(refcount == expected_refcount, "Got unexpected refcount %lu, expected %lu.\n", refcount, expected_refcount);
+
     expected_refcount = get_refcount(device) + 1;
     hr = ID3D10Device_CreateDepthStencilView(device, (ID3D10Resource *)texture, NULL, &dsview);
     ok(SUCCEEDED(hr), "Failed to create a depthstencil view, hr %#lx.\n", hr);
@@ -2776,6 +2813,8 @@ static void test_create_depthstencil_view(void)
         hr = ID3D10Device_CreateDepthStencilView(device, (ID3D10Resource *)texture, &dsv_desc, &dsview);
         ok(hr == E_INVALIDARG, "Test %u: Got unexpected hr %#lx.\n", i, hr);
         ok(!dsview, "Unexpected pointer %p.\n", dsview);
+        hr = ID3D10Device_CreateDepthStencilView(device, (ID3D10Resource *)texture, &dsv_desc, NULL);
+        ok(hr == E_INVALIDARG, "Test %u: Got unexpected hr %#lx.\n", i, hr);
 
         ID3D10Texture2D_Release(texture);
     }
@@ -3038,7 +3077,15 @@ static void test_create_rendertarget_view(void)
         hr = ID3D10Device_CreateRenderTargetView(device, NULL, &rtv_desc, &rtview);
         ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
         ok(!rtview, "Unexpected pointer %p.\n", rtview);
+        hr = ID3D10Device_CreateRenderTargetView(device, NULL, &rtv_desc, NULL);
+        ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
     }
+
+    expected_refcount = get_refcount(device);
+    hr = ID3D10Device_CreateRenderTargetView(device, (ID3D10Resource *)buffer, &rtv_desc, NULL);
+    ok(hr == S_FALSE, "Got unexpected hr %#lx.\n", hr);
+    refcount = get_refcount(device);
+    ok(refcount == expected_refcount, "Got unexpected refcount %lu, expected %lu.\n", refcount, expected_refcount);
 
     expected_refcount = get_refcount(device) + 1;
     hr = ID3D10Device_CreateRenderTargetView(device, (ID3D10Resource *)buffer, &rtv_desc, &rtview);
@@ -3158,6 +3205,8 @@ static void test_create_rendertarget_view(void)
         hr = ID3D10Device_CreateRenderTargetView(device, texture, &rtv_desc, &rtview);
         ok(hr == E_INVALIDARG, "Test %u: Got unexpected hr %#lx.\n", i, hr);
         ok(!rtview, "Unexpected pointer %p.\n", rtview);
+        hr = ID3D10Device_CreateRenderTargetView(device, texture, &rtv_desc, NULL);
+        ok(hr == E_INVALIDARG, "Test %u: Got unexpected hr %#lx.\n", i, hr);
 
         ID3D10Resource_Release(texture);
     }
@@ -3654,11 +3703,19 @@ static void test_create_shader_resource_view(void)
     hr = ID3D10Device_CreateShaderResourceView(device, (ID3D10Resource *)buffer, NULL, &srview);
     ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
     ok(!srview, "Unexpected pointer %p\n", srview);
+    hr = ID3D10Device_CreateShaderResourceView(device, (ID3D10Resource *)buffer, NULL, NULL);
+    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
 
     srv_desc.Format = DXGI_FORMAT_R32G32B32A32_FLOAT;
     srv_desc.ViewDimension = D3D10_SRV_DIMENSION_BUFFER;
     srv_desc.Buffer.ElementOffset = 0;
     srv_desc.Buffer.ElementWidth = 64;
+
+    expected_refcount = get_refcount(device);
+    hr = ID3D10Device_CreateShaderResourceView(device, (ID3D10Resource *)buffer, &srv_desc, NULL);
+    ok(hr == S_FALSE, "Got unexpected hr %#lx.\n", hr);
+    refcount = get_refcount(device);
+    ok(refcount == expected_refcount, "Got unexpected refcount %lu, expected %lu.\n", refcount, expected_refcount);
 
     expected_refcount = get_refcount(device) + 1;
     hr = ID3D10Device_CreateShaderResourceView(device, (ID3D10Resource *)buffer, &srv_desc, &srview);
@@ -3797,6 +3854,8 @@ static void test_create_shader_resource_view(void)
         hr = ID3D10Device_CreateShaderResourceView(device, texture, &srv_desc, &srview);
         ok(hr == E_INVALIDARG, "Test %u: Got unexpected hr %#lx.\n", i, hr);
         ok(!srview, "Unexpected pointer %p.\n", srview);
+        hr = ID3D10Device_CreateShaderResourceView(device, texture, &srv_desc, NULL);
+        ok(hr == E_INVALIDARG, "Test %u: Got unexpected hr %#lx.\n", i, hr);
 
         ID3D10Resource_Release(texture);
     }
@@ -3963,6 +4022,12 @@ void main(point float4 vin[1] : POSITION, inout TriangleStream<gs_out> vout)
     }
 
     /* vertex shader */
+    expected_refcount = get_refcount(device);
+    hr = ID3D10Device_CreateVertexShader(device, vs_4_0, sizeof(vs_4_0), NULL);
+    ok(hr == S_FALSE, "Got unexpected hr %#lx.\n", hr);
+    refcount = get_refcount(device);
+    ok(refcount == expected_refcount, "Got unexpected refcount %lu, expected %lu.\n", refcount, expected_refcount);
+
     expected_refcount = get_refcount(device) + 1;
     hr = ID3D10Device_CreateVertexShader(device, vs_4_0, sizeof(vs_4_0), &vs);
     ok(SUCCEEDED(hr), "Failed to create SM4 vertex shader, hr %#lx\n", hr);
@@ -3997,12 +4062,22 @@ void main(point float4 vin[1] : POSITION, inout TriangleStream<gs_out> vout)
     hr = ID3D10Device_CreateVertexShader(device, ps_4_0, sizeof(ps_4_0), &vs);
     ok(hr == E_INVALIDARG, "Created a SM4 vertex shader from a pixel shader source, hr %#lx\n", hr);
     ok(!vs, "Unexpected pointer %p.\n", vs);
+    hr = ID3D10Device_CreateVertexShader(device, ps_4_0, sizeof(ps_4_0), NULL);
+    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
 
     /* pixel shader */
     ps = (void *)0xdeadbeef;
     hr = ID3D10Device_CreatePixelShader(device, vs_2_0, sizeof(vs_2_0), &ps);
     ok(hr == E_INVALIDARG, "Unexpected hr %#lx.\n", hr);
     ok(!ps, "Unexpected pointer %p.\n", ps);
+    hr = ID3D10Device_CreatePixelShader(device, vs_2_0, sizeof(vs_2_0), NULL);
+    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+
+    expected_refcount = get_refcount(device);
+    hr = ID3D10Device_CreatePixelShader(device, ps_4_0, sizeof(ps_4_0), NULL);
+    ok(hr == S_FALSE, "Got unexpected hr %#lx.\n", hr);
+    refcount = get_refcount(device);
+    ok(refcount == expected_refcount, "Got unexpected refcount %lu, expected %lu.\n", refcount, expected_refcount);
 
     expected_refcount = get_refcount(device) + 1;
     hr = ID3D10Device_CreatePixelShader(device, ps_4_0, sizeof(ps_4_0), &ps);
@@ -4025,6 +4100,12 @@ void main(point float4 vin[1] : POSITION, inout TriangleStream<gs_out> vout)
     ok(!refcount, "Pixel shader has %lu references left.\n", refcount);
 
     /* geometry shader */
+    expected_refcount = get_refcount(device);
+    hr = ID3D10Device_CreateGeometryShader(device, gs_4_0, sizeof(gs_4_0), NULL);
+    ok(hr == S_FALSE, "Got unexpected hr %#lx.\n", hr);
+    refcount = get_refcount(device);
+    ok(refcount == expected_refcount, "Got unexpected refcount %lu, expected %lu.\n", refcount, expected_refcount);
+
     expected_refcount = get_refcount(device) + 1;
     hr = ID3D10Device_CreateGeometryShader(device, gs_4_0, sizeof(gs_4_0), &gs);
     ok(SUCCEEDED(hr), "Failed to create SM4 geometry shader, hr %#lx.\n", hr);
@@ -4101,6 +4182,8 @@ static void test_create_sampler_state(void)
 
     hr = ID3D10Device_CreateSamplerState(device, NULL, &sampler_state1);
     ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+    hr = ID3D10Device_CreateSamplerState(device, NULL, NULL);
+    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
 
     desc.Filter = D3D10_FILTER_MIN_MAG_MIP_LINEAR;
     desc.AddressU = D3D10_TEXTURE_ADDRESS_WRAP;
@@ -4115,6 +4198,12 @@ static void test_create_sampler_state(void)
     desc.BorderColor[3] = 1.0f;
     desc.MinLOD = 0.0f;
     desc.MaxLOD = 16.0f;
+
+    expected_refcount = get_refcount(device);
+    hr = ID3D10Device_CreateSamplerState(device, &desc, NULL);
+    ok(hr == S_FALSE, "Got unexpected hr %#lx.\n", hr);
+    refcount = get_refcount(device);
+    ok(refcount == expected_refcount, "Got unexpected refcount %lu, expected %lu.\n", refcount, expected_refcount);
 
     expected_refcount = get_refcount(device) + 1;
     hr = ID3D10Device_CreateSamplerState(device, &desc, &sampler_state1);
@@ -4266,10 +4355,18 @@ static void test_create_blend_state(void)
 
     hr = ID3D10Device_CreateBlendState(device, NULL, &blend_state1);
     ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+    hr = ID3D10Device_CreateBlendState(device, NULL, NULL);
+    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
 
     memset(&blend_desc, 0, sizeof(blend_desc));
     for (i = 0; i < D3D10_SIMULTANEOUS_RENDER_TARGET_COUNT; ++i)
         blend_desc.RenderTargetWriteMask[i] = D3D10_COLOR_WRITE_ENABLE_ALL;
+
+    expected_refcount = get_refcount(device);
+    hr = ID3D10Device_CreateBlendState(device, &blend_desc, NULL);
+    ok(hr == S_FALSE, "Got unexpected hr %#lx.\n", hr);
+    refcount = get_refcount(device);
+    ok(refcount == expected_refcount, "Got unexpected refcount %lu, expected %lu.\n", refcount, expected_refcount);
 
     expected_refcount = get_refcount(device) + 1;
     hr = ID3D10Device_CreateBlendState(device, &blend_desc, &blend_state1);
@@ -4464,6 +4561,8 @@ static void test_create_depthstencil_state(void)
 
     hr = ID3D10Device_CreateDepthStencilState(device, NULL, &ds_state1);
     ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+    hr = ID3D10Device_CreateDepthStencilState(device, NULL, NULL);
+    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
 
     ds_desc.DepthEnable = TRUE;
     ds_desc.DepthWriteMask = D3D10_DEPTH_WRITE_MASK_ALL;
@@ -4479,6 +4578,12 @@ static void test_create_depthstencil_state(void)
     ds_desc.BackFace.StencilDepthFailOp = D3D10_STENCIL_OP_KEEP;
     ds_desc.BackFace.StencilPassOp = D3D10_STENCIL_OP_KEEP;
     ds_desc.BackFace.StencilFunc = D3D10_COMPARISON_ALWAYS;
+
+    expected_refcount = get_refcount(device);
+    hr = ID3D10Device_CreateDepthStencilState(device, &ds_desc, NULL);
+    ok(hr == S_FALSE, "Got unexpected hr %#lx.\n", hr);
+    refcount = get_refcount(device);
+    ok(refcount == expected_refcount, "Got unexpected refcount %lu, expected %lu.\n", refcount, expected_refcount);
 
     expected_refcount = get_refcount(device) + 1;
     hr = ID3D10Device_CreateDepthStencilState(device, &ds_desc, &ds_state1);
@@ -4568,6 +4673,8 @@ static void test_create_rasterizer_state(void)
 
     hr = ID3D10Device_CreateRasterizerState(device, NULL, &rast_state1);
     ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+    hr = ID3D10Device_CreateRasterizerState(device, NULL, NULL);
+    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
 
     rast_desc.FillMode = D3D10_FILL_SOLID;
     rast_desc.CullMode = D3D10_CULL_BACK;
@@ -4579,6 +4686,12 @@ static void test_create_rasterizer_state(void)
     rast_desc.ScissorEnable = FALSE;
     rast_desc.MultisampleEnable = FALSE;
     rast_desc.AntialiasedLineEnable = FALSE;
+
+    expected_refcount = get_refcount(device);
+    hr = ID3D10Device_CreateRasterizerState(device, &rast_desc, NULL);
+    ok(hr == S_FALSE, "Got unexpected hr %#lx.\n", hr);
+    refcount = get_refcount(device);
+    ok(refcount == expected_refcount, "Got unexpected refcount %lu, expected %lu.\n", refcount, expected_refcount);
 
     expected_refcount = get_refcount(device) + 1;
     hr = ID3D10Device_CreateRasterizerState(device, &rast_desc, &rast_state1);
@@ -12545,6 +12658,14 @@ static void test_create_input_layout(void)
         ok(refcount >= expected_refcount, "Got refcount %lu, expected >= %lu.\n",
                 refcount, expected_refcount);
         ID3D10InputLayout_Release(input_layout);
+
+        expected_refcount = get_refcount(device);
+        hr = ID3D10Device_CreateInputLayout(device, layout_desc, ARRAY_SIZE(layout_desc),
+                vs_code, sizeof(vs_code), NULL);
+        ok(hr == S_FALSE, "Format %#x: Got unexpected hr %#lx.\n", vertex_formats[i], hr);
+        refcount = get_refcount(device);
+        ok(refcount == expected_refcount, "Format %#x: Got refcount %lu, expected %lu.\n",
+                vertex_formats[i], refcount, expected_refcount);
     }
 
     refcount = ID3D10Device_Release(device);
@@ -15328,6 +15449,10 @@ static void check_so_desc_(unsigned int line, ID3D10Device *device,
         ok_(__FILE__, line)(!gs, "Got unexpected geometry shader %p.\n", gs);
     if (SUCCEEDED(hr))
         ID3D10GeometryShader_Release(gs);
+
+    hr = ID3D10Device_CreateGeometryShaderWithStreamOutput(device, code, code_size,
+            entry, entry_count, stride, NULL);
+    ok_(__FILE__, line)(hr == (valid ? S_FALSE : E_INVALIDARG), "Got unexpected hr %#lx.\n", hr);
 }
 
 static void test_stream_output(void)
